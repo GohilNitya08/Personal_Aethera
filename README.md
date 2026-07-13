@@ -1,2 +1,24 @@
 # AETHERA
-A Privacy-First Intelligent Cloud Document Storage &amp; Secure Collaboration Platform built using React, FastAPI and MySQL.
+
+A Privacy-First Intelligent Cloud Document Storage & Secure Collaboration Platform.
+
+## Technology Stack
+
+Frontend
+- React
+
+Backend
+- Python FastAPI
+
+Database
+- MySQL
+
+Cloud
+- Pending
+
+Authentication
+- JWT
+- Google OAuth
+
+Version Control
+- GitHub
