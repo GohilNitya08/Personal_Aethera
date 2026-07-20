@@ -283,3 +283,27 @@ CREATE TABLE comments (
         ON DELETE CASCADE
 
 );
+
+CREATE TABLE activity_logs (
+
+    activity_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id BIGINT NOT NULL,
+
+    file_id BIGINT,
+
+    activity_type VARCHAR(100) NOT NULL,
+
+    activity_description TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE SET NULL
+
+);
