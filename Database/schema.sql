@@ -349,3 +349,11 @@ CREATE TABLE favorites (
     UNIQUE (user_id, file_id)
 
 );
+
+CREATE TABLE tags (
+
+    tag_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    tag_name VARCHAR(100) NOT NULL UNIQUE
+
+);
