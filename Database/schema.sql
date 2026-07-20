@@ -357,3 +357,24 @@ CREATE TABLE tags (
     tag_name VARCHAR(100) NOT NULL UNIQUE
 
 );
+
+CREATE TABLE file_tags (
+
+    file_tag_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    file_id BIGINT NOT NULL,
+
+    tag_id BIGINT NOT NULL,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (tag_id)
+        REFERENCES tags(tag_id)
+        ON DELETE CASCADE,
+
+    UNIQUE (file_id, tag_id)
+
+);
+
