@@ -72,3 +72,76 @@ CREATE TABLE workspaces (
         ON DELETE CASCADE
 );
 
+CREATE TABLE workspace_members (
+
+    member_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    workspace_id BIGINT NOT NULL,
+
+    user_id BIGINT NOT NULL,
+
+    role ENUM(
+        'OWNER',
+        'ADMIN',
+        'EDITOR',
+        'VIEWER'
+    ) DEFAULT 'VIEWER',
+
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    invited_by BIGINT,
+
+    FOREIGN KEY (workspace_id)
+        REFERENCES workspaces(workspace_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (invited_by)
+        REFERENCES users(user_id)
+        ON DELETE SET NULL,
+
+    UNIQUE (workspace_id, user_id)
+
+);
+
+CREATE TABLE folders (
+
+    folder_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    workspace_id BIGINT NOT NULL,
+
+    parent_folder_id BIGINT NULL,
+
+    folder_name VARCHAR(255) NOT NULL,
+
+    description TEXT,
+
+    color VARCHAR(20) DEFAULT 'blue',
+
+    is_favorite BOOLEAN DEFAULT FALSE,
+
+    is_archived BOOLEAN DEFAULT FALSE,
+
+    created_by BIGINT NOT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (workspace_id)
+        REFERENCES workspaces(workspace_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (parent_folder_id)
+        REFERENCES folders(folder_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (created_by)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE
+
+);
