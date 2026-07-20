@@ -258,3 +258,28 @@ CREATE TABLE file_shares (
         ON DELETE CASCADE
 
 );
+
+CREATE TABLE comments (
+
+    comment_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    file_id BIGINT NOT NULL,
+
+    user_id BIGINT NOT NULL,
+
+    comment TEXT NOT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE
+
+);
