@@ -145,3 +145,48 @@ CREATE TABLE folders (
         ON DELETE CASCADE
 
 );
+
+CREATE TABLE files (
+
+    file_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    folder_id BIGINT NOT NULL,
+
+    uploaded_by BIGINT NOT NULL,
+
+    file_name VARCHAR(255) NOT NULL,
+
+    original_file_name VARCHAR(255) NOT NULL,
+
+    file_extension VARCHAR(20),
+
+    mime_type VARCHAR(100),
+
+    file_size BIGINT NOT NULL,
+
+    storage_path TEXT NOT NULL,
+
+    file_hash CHAR(64) NOT NULL,
+
+    ai_enabled BOOLEAN DEFAULT FALSE,
+
+    is_favorite BOOLEAN DEFAULT FALSE,
+
+    is_archived BOOLEAN DEFAULT FALSE,
+
+    is_deleted BOOLEAN DEFAULT FALSE,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (folder_id)
+        REFERENCES folders(folder_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (uploaded_by)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE
+
+);
