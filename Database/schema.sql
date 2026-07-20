@@ -327,3 +327,25 @@ CREATE TABLE notifications (
         ON DELETE CASCADE
 
 );
+
+CREATE TABLE favorites (
+
+    favorite_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    user_id BIGINT NOT NULL,
+
+    file_id BIGINT NOT NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE CASCADE,
+
+    UNIQUE (user_id, file_id)
+
+);
