@@ -190,3 +190,71 @@ CREATE TABLE files (
         ON DELETE CASCADE
 
 );
+
+CREATE TABLE file_versions (
+
+    version_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    file_id BIGINT NOT NULL,
+
+    version_number INT NOT NULL,
+
+    storage_path TEXT NOT NULL,
+
+    file_size BIGINT NOT NULL,
+
+    file_hash CHAR(64) NOT NULL,
+
+    uploaded_by BIGINT NOT NULL,
+
+    version_note TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (uploaded_by)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    UNIQUE (file_id, version_number)
+
+);
+
+CREATE TABLE file_shares (
+
+    share_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    file_id BIGINT NOT NULL,
+
+    shared_by BIGINT NOT NULL,
+
+    shared_with BIGINT,
+
+    share_type ENUM('PRIVATE','PUBLIC','LINK') DEFAULT 'PRIVATE',
+
+    permission ENUM('VIEW','EDIT') DEFAULT 'VIEW',
+
+    share_link VARCHAR(255) UNIQUE,
+
+    password_hash VARCHAR(255),
+
+    expires_at TIMESTAMP NULL,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (file_id)
+        REFERENCES files(file_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (shared_by)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (shared_with)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE
+
+);
