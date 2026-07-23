@@ -1,14 +1,28 @@
 """FastAPI application entry point."""
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application."""
+    if settings.app_env.lower() == "development":
+        logger.info(
+            "Development database configuration: host=%s port=%s name=%s user=%s env_file_loaded=%s",
+            settings.mysql_host,
+            settings.mysql_port,
+            settings.mysql_database,
+            settings.mysql_user,
+            settings.env_file_loaded,
+        )
+
     application = FastAPI(
         title=settings.app_name,
         debug=settings.debug,
