@@ -377,4 +377,3 @@ CREATE TABLE file_tags (
     UNIQUE (file_id, tag_id)
 
 );
-
