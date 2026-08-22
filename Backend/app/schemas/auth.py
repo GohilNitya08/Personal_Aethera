@@ -70,6 +70,14 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+class GoogleOAuthExchangeRequest(BaseModel):
+    """A short-lived, single-use code returned to the local React client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=32, max_length=256)
+
+
 class ForgotPasswordRequest(BaseModel):
     """Email address for a password-reset request."""
 
@@ -90,6 +98,21 @@ class ResetPasswordRequest(PasswordValidationModel):
     @classmethod
     def validate_password(cls, password: str) -> str:
         return cls._validate_password_length(password)
+
+
+class VerifyPasswordResetOtpRequest(BaseModel):
+    """One-time challenge and code supplied by the reset client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    challenge: str = Field(min_length=32, max_length=256)
+    otp: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class PasswordResetTokenResponse(BaseModel):
+    """Short-lived token returned after successful OTP verification."""
+
+    reset_token: str
 
 
 class UserResponse(BaseModel):

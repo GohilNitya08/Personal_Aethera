@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import uuid
+from pathlib import PurePath
 from typing import Any
 
+from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import settings
 from app.repositories.file_repository import FileRecord, FileRepository, FileVersion
 from app.repositories.folder_repository import Folder
 from app.schemas.file import FileCreateRequest, FileUpdateRequest, FileVersionCreateRequest
@@ -19,6 +24,7 @@ from app.services.workspace_service import (
     WorkspacePermissionError,
     WorkspaceService,
 )
+from app.services.storage_service import CloudStorageService
 
 
 class FileError(Exception):
@@ -67,6 +73,59 @@ class FileService:
             self._repository.commit()
         except Exception:
             self._repository.rollback()
+            raise
+        file = self._repository.get_by_id(file_id, user_id=actor_id, include_deleted=False)
+        if file is None:
+            raise RuntimeError("Created file could not be loaded")
+        return file
+
+    def upload_file(
+        self, actor_id: int, folder_id: int, upload: UploadFile,
+        storage: CloudStorageService,
+    ) -> FileRecord:
+        """Upload bytes privately before creating the corresponding metadata."""
+        folder = self._get_active_folder(folder_id, actor_id)
+        self._require_writer(folder, actor_id)
+        original_name = PurePath(upload.filename or "upload").name[:255]
+        if not original_name:
+            raise FileConflictError("A file name is required")
+        extension = PurePath(original_name).suffix.lstrip(".")[:20] or None
+        digest = hashlib.sha256()
+        size = 0
+        upload.file.seek(0)
+        while chunk := upload.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > settings.max_upload_size_bytes:
+                raise FileConflictError("File exceeds the configured upload size limit")
+            digest.update(chunk)
+        upload.file.seek(0)
+        object_key = f"{settings.gcs_object_prefix.rstrip('/')}/{folder.workspace_id}/{uuid.uuid4()}-{original_name}"
+        storage.upload(upload.file, object_key, upload.content_type)
+        values = {
+            "folder_id": folder_id,
+            "file_name": original_name,
+            "original_file_name": original_name,
+            "file_extension": extension,
+            "mime_type": upload.content_type,
+            "file_size": size,
+            "storage_path": object_key,
+            "file_hash": digest.hexdigest(),
+            "ai_enabled": False,
+            "uploaded_by": actor_id,
+        }
+        try:
+            file_id = self._repository.create_file(values)
+            self._repository.record_activity(
+                user_id=actor_id, file_id=file_id, activity_type="FILE_UPLOADED",
+                detail=f"File '{original_name}' uploaded",
+            )
+            self._repository.commit()
+        except Exception:
+            self._repository.rollback()
+            try:
+                storage.delete(object_key)
+            except Exception:
+                pass
             raise
         file = self._repository.get_by_id(file_id, user_id=actor_id, include_deleted=False)
         if file is None:

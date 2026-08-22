@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     mysql_password: str = ""
     mysql_database: str = "aethera"
 
+    gcs_bucket_name: str = ""
+    gcs_object_prefix: str = "aethera"
+    max_upload_size_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, gt=0, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    password_reset_otp_expire_minutes: int = Field(default=10, gt=0, le=60)
+    password_reset_otp_max_attempts: int = Field(default=5, gt=0, le=20)
+
     jwt_secret_key: str = DEVELOPMENT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = Field(default=30, gt=0)
@@ -37,7 +49,9 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://127.0.0.1:8000/api/v1/auth/google/callback"
+    google_oauth_frontend_redirect_uri: str = "http://localhost:5173/oauth/callback"
     google_oauth_state_expire_minutes: int = Field(default=10, gt=0, le=60)
+    google_oauth_handoff_expire_seconds: int = Field(default=60, gt=0, le=300)
     google_oauth_cookie_secure: bool = False
 
     model_config = SettingsConfigDict(

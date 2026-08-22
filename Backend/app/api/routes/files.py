@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.routes.folders import get_folder_service
@@ -28,6 +28,7 @@ from app.services.file_service import (
 )
 from app.services.folder_service import FolderService
 from app.services.workspace_service import WorkspaceService
+from app.services.storage_service import CloudStorageService, StorageNotConfiguredError, StorageUploadError
 
 router = APIRouter(tags=["files"])
 FileId = Annotated[int, Path(gt=0)]
@@ -41,6 +42,34 @@ def get_file_service(
 ) -> FileService:
     """Build the request-scoped file service from existing dependency providers."""
     return FileService(FileRepository(db), folder_service, workspace_service)
+
+
+def get_storage_service() -> CloudStorageService:
+    return CloudStorageService()
+
+
+@router.post(
+    "/folders/{folder_id}/files/upload",
+    response_model=FileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a file to private cloud storage",
+)
+def upload_file(
+    folder_id: FolderId,
+    upload: Annotated[UploadFile, File(...)],
+    current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+    storage: Annotated[CloudStorageService, Depends(get_storage_service)],
+) -> FileResponse:
+    try:
+        file = service.upload_file(current_user.user_id, folder_id, upload, storage)
+    except (FileNotFoundError, FilePermissionError, FileConflictError) as error:
+        raise _file_http_exception(error) from error
+    except StorageNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except StorageUploadError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return _file_response(file)
 
 
 @router.post(

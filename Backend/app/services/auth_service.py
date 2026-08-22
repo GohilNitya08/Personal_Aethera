@@ -17,8 +17,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.repositories.auth_repository import AuthRepository, AuthUser
+from app.services.email_service import EmailDeliveryError, EmailNotConfiguredError, EmailService
+from app.services.otp_service import OtpService
 
 PASSWORD_CONTEXT = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_otp_service = OtpService()
 
 
 class AuthError(Exception):
@@ -36,6 +39,8 @@ class DuplicateUsernameError(AuthError):
 class InvalidCredentialsError(AuthError):
     """Raised when login credentials do not authenticate a user."""
 
+class EmailNotVerifiedError(AuthError):
+    """Raised when password login is attempted with an unverified email."""
 
 class InvalidTokenError(AuthError):
     """Raised when a JWT is malformed, expired, or has the wrong purpose."""
@@ -115,8 +120,11 @@ class _GoogleCertRequest:
 class AuthService:
     """Coordinate password authentication, repository access, and token creation."""
 
-    def __init__(self, repository: AuthRepository) -> None:
+    def __init__(self, repository: AuthRepository, email_service: EmailService | None = None,
+                 otp_service: OtpService | None = None) -> None:
         self._repository = repository
+        self._email_service = email_service or EmailService()
+        self._otp_service = otp_service or _otp_service
 
     def register(
         self,
@@ -154,14 +162,21 @@ class AuthService:
     def login(self, *, email: str, password: str) -> AuthTokens:
         """Verify credentials, update login metadata, and issue both JWTs."""
         user = self._repository.get_by_email(email.lower())
+
         if user is None or not user.password_hash:
             raise InvalidCredentialsError
+
         if not self._verify_password(password, user.password_hash):
             raise InvalidCredentialsError
+
+        if not user.email_verified:
+            raise EmailNotVerifiedError
+
         self._ensure_active(user)
 
         self._repository.update_last_login(user.user_id)
         self._repository.commit()
+
         return self._issue_token_pair(user)
 
     def login_with_google(self, identity: GoogleIdentity) -> AuthTokens:
@@ -282,15 +297,27 @@ class AuthService:
         )
 
     def request_password_reset(self, email: str) -> None:
-        """Accept a reset request without revealing whether the account exists.
-
-        Email delivery is intentionally deferred. A future mail workflow will create a
-        password-reset JWT and deliver it only for active accounts.
-        """
+        """Issue and email an OTP without disclosing whether an account exists."""
         user = self._repository.get_by_email(email.lower())
         if user is not None and user.account_status == "ACTIVE":
-            # Reserved for future email delivery; keep the response identical either way.
-            return
+            challenge, otp = self._otp_service.issue(user.user_id)
+            try:
+                self._email_service.send_password_reset_otp(user.email, otp)
+            except (EmailNotConfiguredError, EmailDeliveryError):
+                self._otp_service.consume(challenge)
+                raise
+
+    def verify_password_reset_otp(self, challenge: str, otp: str) -> str:
+        """Consume a valid OTP and issue a short-lived reset token."""
+        try:
+            user_id = self._otp_service.verify(challenge, otp)
+        except ValueError as error:
+            raise InvalidTokenError from error
+        user = self._repository.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError
+        self._ensure_active(user)
+        return self._create_token(user, token_type="password_reset", expires_in_minutes=10)
 
     def reset_password(self, *, reset_token: str, new_password: str) -> None:
         """Validate a future-issued reset token and store a new bcrypt hash."""
