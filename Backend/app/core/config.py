@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = Field(default=30, gt=0)
     jwt_refresh_token_expire_minutes: int = Field(default=60 * 24 * 7, gt=0)
 
+    # Google OpenID Connect. Leave the client credentials unset until they are
+    # provisioned in Google Cloud; the Google endpoints will then return 503.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://127.0.0.1:8000/api/v1/auth/google/callback"
+    google_oauth_state_expire_minutes: int = Field(default=10, gt=0, le=60)
+    google_oauth_cookie_secure: bool = False
+
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
@@ -46,6 +54,12 @@ class Settings(BaseSettings):
             and self.jwt_secret_key == DEVELOPMENT_JWT_SECRET
         ):
             raise ValueError("JWT_SECRET_KEY must be set to a unique value in production")
+        if (
+            self.app_env.lower() in {"production", "prod"}
+            and self.google_oauth_configured
+            and not self.google_oauth_cookie_secure
+        ):
+            raise ValueError("GOOGLE_OAUTH_COOKIE_SECURE must be true in production")
         return self
 
     @property
@@ -73,6 +87,11 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         """Convert a comma-separated CORS setting into a clean origin list."""
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        """Return whether the credentials required for Google OAuth are present."""
+        return bool(self.google_client_id and self.google_client_secret)
 
 
 @lru_cache

@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import hmac
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, RedirectResponse
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.database.session import get_db
 from app.repositories.auth_repository import AuthRepository, AuthUser
 from app.schemas.auth import (
     ForgotPasswordRequest,
-    GoogleAuthRequest,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
@@ -26,6 +32,8 @@ from app.services.auth_service import (
     AuthTokens,
     DuplicateEmailError,
     DuplicateUsernameError,
+    GoogleOAuthError,
+    GoogleOAuthNotConfiguredError,
     InactiveAccountError,
     InvalidCredentialsError,
     InvalidTokenError,
@@ -33,6 +41,8 @@ from app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+_GOOGLE_STATE_COOKIE = "aethera_google_oauth_state"
 
 
 def get_auth_service(db: Annotated[Session, Depends(get_db)]) -> AuthService:
@@ -173,13 +183,128 @@ def verify_email(token: Annotated[str | None, Query()] = None) -> MessageRespons
     )
 
 
-@router.post("/google", response_model=TokenResponse, summary="Sign in with Google")
-def google_auth(payload: GoogleAuthRequest) -> TokenResponse:
-    """Reserve Google sign-in until Google OAuth credentials are configured."""
-    del payload
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Google OAuth is not configured yet",
+@router.get("/google/login", summary="Start Google sign-in")
+def google_login() -> RedirectResponse:
+    """Redirect the browser to Google's authorization endpoint with CSRF state."""
+    _require_google_oauth_configuration()
+    nonce = secrets.token_urlsafe(32)
+    state = _create_google_oauth_state(nonce)
+    authorization_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(
+        {
+            "client_id": settings.google_client_id,
+            "redirect_uri": settings.google_redirect_uri,
+            "response_type": "code",
+            "scope": "openid email profile",
+            "state": state,
+            "prompt": "select_account",
+        }
+    )
+    response = RedirectResponse(url=authorization_url, status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key=_GOOGLE_STATE_COOKIE,
+        value=nonce,
+        max_age=settings.google_oauth_state_expire_minutes * 60,
+        httponly=True,
+        secure=settings.google_oauth_cookie_secure,
+        samesite="lax",
+        path=f"{settings.api_v1_prefix}/auth/google",
+    )
+    return response
+
+
+@router.get("/google/callback", response_model=TokenResponse, summary="Complete Google sign-in")
+def google_callback(
+    request: Request,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+    code: Annotated[str | None, Query()] = None,
+    state: Annotated[str | None, Query()] = None,
+    error: Annotated[str | None, Query()] = None,
+) -> JSONResponse:
+    """Validate OAuth state, verify Google's identity, and issue AETHERA JWTs."""
+    if error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google authentication was cancelled or denied",
+        )
+    _require_google_oauth_configuration()
+    if not _is_valid_google_oauth_state(
+        state, request.cookies.get(_GOOGLE_STATE_COOKIE)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired Google OAuth state",
+        )
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google authorization code is missing",
+        )
+    try:
+        identity = service.verify_google_authorization_code(code)
+        tokens = service.login_with_google(identity)
+    except GoogleOAuthNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth is not configured",
+        ) from error
+    except GoogleOAuthError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google authentication failed",
+        ) from error
+    except InactiveAccountError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is not active",
+        ) from error
+
+    response = JSONResponse(
+        content=_token_response(tokens).model_dump(),
+        headers={"Cache-Control": "no-store"},
+    )
+    response.delete_cookie(key=_GOOGLE_STATE_COOKIE, path=f"{settings.api_v1_prefix}/auth/google")
+    return response
+
+
+def _require_google_oauth_configuration() -> None:
+    if not settings.google_oauth_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google OAuth is not configured",
+        )
+
+
+def _create_google_oauth_state(nonce: str) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "nonce": nonce,
+            "token_type": "google_oauth_state",
+            "iat": now,
+            "exp": now + timedelta(minutes=settings.google_oauth_state_expire_minutes),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def _is_valid_google_oauth_state(state: str | None, cookie_nonce: str | None) -> bool:
+    """Check the short-lived signed state and the HttpOnly browser cookie."""
+    if not state or not cookie_nonce:
+        return False
+    try:
+        claims = jwt.decode(
+            state,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError:
+        return False
+    nonce = claims.get("nonce")
+    return (
+        claims.get("token_type") == "google_oauth_state"
+        and isinstance(nonce, str)
+        and hmac.compare_digest(nonce, cookie_nonce)
     )
 
 

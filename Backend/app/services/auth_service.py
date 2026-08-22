@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
+import re
+from typing import Any
 
+import httpx
+from email_validator import EmailNotValidError, validate_email
+from google.oauth2 import id_token as google_id_token
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.exc import IntegrityError
@@ -43,6 +49,14 @@ class UserNotFoundError(AuthError):
     """Raised when a token references a user that no longer exists."""
 
 
+class GoogleOAuthError(AuthError):
+    """Raised when Google OAuth cannot establish a verified identity."""
+
+
+class GoogleOAuthNotConfiguredError(GoogleOAuthError):
+    """Raised when the Google OAuth client credentials are absent."""
+
+
 @dataclass(frozen=True, slots=True)
 class AuthTokens:
     """A JWT access and refresh token pair."""
@@ -58,6 +72,44 @@ class AccessToken:
 
     access_token: str
     access_token_expires_in: int
+
+
+@dataclass(frozen=True, slots=True)
+class GoogleIdentity:
+    """The minimal verified identity claims used to link an AETHERA account."""
+
+    subject: str
+    email: str
+    full_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class _GoogleCertResponse:
+    """Small adapter matching the response contract used by google-auth."""
+
+    status: int
+    data: bytes
+
+
+class _GoogleCertRequest:
+    """Fetch Google signing certificates through the project's HTTP client."""
+
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        **_: object,
+    ) -> _GoogleCertResponse:
+        response = httpx.request(
+            method,
+            url,
+            content=body,
+            headers=headers,
+            timeout=10.0,
+        )
+        return _GoogleCertResponse(status=response.status_code, data=response.content)
 
 
 class AuthService:
@@ -111,6 +163,110 @@ class AuthService:
         self._repository.update_last_login(user.user_id)
         self._repository.commit()
         return self._issue_token_pair(user)
+
+    def login_with_google(self, identity: GoogleIdentity) -> AuthTokens:
+        """Find, link, or create an account for a verified Google identity."""
+        user = self._repository.get_by_google_id(identity.subject)
+        if user is None:
+            user = self._repository.get_by_email(identity.email)
+            try:
+                if user is None:
+                    user_id = self._repository.create_google_user(
+                        username=self._google_username(identity),
+                        full_name=identity.full_name,
+                        email=identity.email,
+                        google_id=identity.subject,
+                    )
+                    user = self._repository.get_by_id(user_id)
+                    if user is None:
+                        raise RuntimeError("Created Google user could not be loaded")
+                elif not self._repository.link_google_identity(
+                    user_id=user.user_id, google_id=identity.subject
+                ):
+                    # A concurrent request may have completed the same link.
+                    user = self._repository.get_by_google_id(identity.subject)
+                    if user is None:
+                        raise GoogleOAuthError("Unable to link Google account")
+            except IntegrityError as error:
+                self._repository.rollback()
+                # Resolve the only safe concurrent case: another request linked the
+                # same Google subject while this request was in progress.
+                user = self._repository.get_by_google_id(identity.subject)
+                if user is None:
+                    raise GoogleOAuthError("Unable to create Google account") from error
+
+        self._ensure_active(user)
+        if not self._repository.mark_google_email_verified(
+            user_id=user.user_id, google_id=identity.subject
+        ):
+            self._repository.rollback()
+            raise GoogleOAuthError("Unable to confirm Google account")
+        self._repository.update_last_login(user.user_id)
+        self._repository.commit()
+        return self._issue_token_pair(user)
+
+    @staticmethod
+    def verify_google_authorization_code(code: str) -> GoogleIdentity:
+        """Exchange an authorization code and verify Google's signed ID token."""
+        if not settings.google_oauth_configured:
+            raise GoogleOAuthNotConfiguredError
+        if not code or len(code) > 4096:
+            raise GoogleOAuthError("Invalid authorization code")
+
+        try:
+            response = httpx.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": settings.google_client_id,
+                    "client_secret": settings.google_client_secret,
+                    "redirect_uri": settings.google_redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            token_data: dict[str, Any] = response.json()
+            raw_id_token = token_data.get("id_token")
+            if not isinstance(raw_id_token, str) or not raw_id_token:
+                raise GoogleOAuthError("Google did not return an ID token")
+            claims = google_id_token.verify_oauth2_token(
+                raw_id_token,
+                _GoogleCertRequest(),
+                settings.google_client_id,
+            )
+        except GoogleOAuthError:
+            raise
+        except (httpx.HTTPError, ValueError) as error:
+            raise GoogleOAuthError("Google authentication failed") from error
+        except Exception as error:
+            # google-auth raises several implementation-specific token errors.
+            raise GoogleOAuthError("Google identity token verification failed") from error
+
+        subject = claims.get("sub")
+        email = claims.get("email")
+        if (
+            not isinstance(subject, str)
+            or not subject
+            or len(subject) > 255
+            or not isinstance(email, str)
+            or claims.get("email_verified") is not True
+        ):
+            raise GoogleOAuthError("Google account does not have a verified email")
+        try:
+            normalized_email = validate_email(email, check_deliverability=False).normalized
+        except EmailNotValidError as error:
+            raise GoogleOAuthError("Google returned an invalid email address") from error
+
+        name = claims.get("name")
+        full_name = name.strip() if isinstance(name, str) else ""
+        if not full_name:
+            full_name = normalized_email.split("@", 1)[0]
+        return GoogleIdentity(
+            subject=subject,
+            email=normalized_email.lower(),
+            full_name=full_name[:100],
+        )
 
     def refresh_access_token(self, refresh_token: str) -> AccessToken:
         """Validate a refresh token and issue a new access token."""
@@ -235,3 +391,14 @@ class AuthService:
             raise DuplicateEmailError
         if self._repository.get_by_username(username):
             raise DuplicateUsernameError
+
+    @staticmethod
+    def _google_username(identity: GoogleIdentity) -> str:
+        """Create a stable, valid username without exposing a Google subject."""
+        local_part = identity.email.split("@", 1)[0]
+        base = re.sub(r"[^A-Za-z0-9_]", "_", local_part).strip("_") or "googleuser"
+        base = base[:21]
+        if len(base) < 3:
+            base = (base + "user")[:21]
+        suffix = hashlib.sha256(identity.subject.encode("utf-8")).hexdigest()[:8]
+        return f"{base}_{suffix}"

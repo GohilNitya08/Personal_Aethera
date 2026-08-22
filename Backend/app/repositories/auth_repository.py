@@ -59,6 +59,10 @@ class AuthRepository:
         """Return a user matching a username, if one exists."""
         return self._get_one_by("username", username)
 
+    def get_by_google_id(self, google_id: str) -> AuthUser | None:
+        """Return a user linked to a verified Google subject, if one exists."""
+        return self._get_one_by("google_id", google_id)
+
     def get_by_id(self, user_id: int) -> AuthUser | None:
         """Return a user by primary key, if one exists."""
         query = text(
@@ -93,6 +97,61 @@ class AuthRepository:
         )
         return int(result.lastrowid)
 
+    def create_google_user(
+        self,
+        *,
+        username: str,
+        full_name: str,
+        email: str,
+        google_id: str,
+    ) -> int:
+        """Create a passwordless account from a verified Google identity."""
+        result = self._db.execute(
+            text(
+                """
+                INSERT INTO users
+                    (username, full_name, email, password_hash, google_id, email_verified)
+                VALUES
+                    (:username, :full_name, :email, NULL, :google_id, TRUE)
+                """
+            ),
+            {
+                "username": username,
+                "full_name": full_name,
+                "email": email,
+                "google_id": google_id,
+            },
+        )
+        return int(result.lastrowid)
+
+    def link_google_identity(self, *, user_id: int, google_id: str) -> bool:
+        """Link an unlinked account to Google and mark its email verified."""
+        result = self._db.execute(
+            text(
+                """
+                UPDATE users
+                SET google_id = :google_id, email_verified = TRUE
+                WHERE user_id = :user_id AND google_id IS NULL
+                """
+            ),
+            {"user_id": user_id, "google_id": google_id},
+        )
+        return result.rowcount == 1
+
+    def mark_google_email_verified(self, *, user_id: int, google_id: str) -> bool:
+        """Record that the linked Google identity supplied a verified email."""
+        result = self._db.execute(
+            text(
+                """
+                UPDATE users
+                SET email_verified = TRUE
+                WHERE user_id = :user_id AND google_id = :google_id
+                """
+            ),
+            {"user_id": user_id, "google_id": google_id},
+        )
+        return result.rowcount == 1
+
     def update_last_login(self, user_id: int) -> None:
         """Record a successful login using the database server timestamp."""
         self._db.execute(
@@ -121,7 +180,7 @@ class AuthRepository:
 
     def _get_one_by(self, column: str, value: str) -> AuthUser | None:
         """Look up one user through a fixed, internal column name."""
-        if column not in {"email", "username"}:
+        if column not in {"email", "username", "google_id"}:
             raise ValueError("Unsupported user lookup column")
 
         query = text(

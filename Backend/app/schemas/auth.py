@@ -92,14 +92,6 @@ class ResetPasswordRequest(PasswordValidationModel):
         return cls._validate_password_length(password)
 
 
-class GoogleAuthRequest(BaseModel):
-    """Google identity token accepted once Google OAuth is configured."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id_token: str = Field(min_length=1)
-
-
 class UserResponse(BaseModel):
     """Public account information returned after registration."""
 
