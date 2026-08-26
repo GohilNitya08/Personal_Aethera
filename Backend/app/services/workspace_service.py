@@ -295,12 +295,14 @@ class WorkspaceService:
 
     def transfer_ownership(self, workspace_id: int, actor_id: int, new_owner_id: int) -> Workspace:
         """Transfer workspace ownership to an existing active member."""
-        self._require_owner(workspace_id, actor_id)
-        if new_owner_id == actor_id:
+        workspace = self._require_owner(workspace_id, actor_id)
+        if new_owner_id == actor_id or new_owner_id == workspace.user_id:
             raise WorkspaceConflictError("The current owner is already the workspace owner")
         new_owner_membership = self._repository.get_membership(workspace_id, new_owner_id)
         if new_owner_membership is None:
             raise WorkspaceConflictError("New owner must already be a workspace member")
+        if new_owner_membership.role == "OWNER":
+            raise WorkspaceConflictError("The current owner is already the workspace owner")
         if self._user_repository.get_active_by_id(new_owner_id) is None:
             raise WorkspaceNotFoundError("New owner was not found")
         try:

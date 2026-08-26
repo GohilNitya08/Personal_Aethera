@@ -59,11 +59,328 @@ function Workspaces({ open }) { const { data, loading, error, reload } = useAsyn
   const create = async (e) => { e.preventDefault(); setMessage(''); try { const workspace = await api.createWorkspace(form); setShowForm(false); open('workspace', workspace.workspace_id); } catch (err) { setMessage(err.message); } };
   return <div className="page-content"><div className="page-actions"><p className="muted">Create spaces for projects, teams, and private work.</p><button className="button primary" onClick={() => setShowForm(!showForm)}>+ New workspace</button></div>{showForm && <form className="inline-form" onSubmit={create}><Field label="Workspace name" value={form.workspace_name} onChange={(workspace_name) => setForm({ ...form, workspace_name })} required /><label className="field"><span>Type</span><select value={form.workspace_type} onChange={(e) => setForm({ ...form, workspace_type: e.target.value })}><option value="PERSONAL">Personal</option><option value="INSTITUTION">Institution</option></select></label><Field label="Description (optional)" value={form.description} onChange={(description) => setForm({ ...form, description })} /><label className="field"><span>Visibility</span><select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="PRIVATE">Private</option><option value="SHARED">Shared</option></select></label>{message && <div className="notice">{message}</div>}<button className="button primary">Create workspace</button></form>}{error ? <ErrorState message={error} retry={reload} /> : loading ? <Loading /> : data.length ? <div className="workspace-list">{data.map((workspace) => <WorkspaceCard key={workspace.workspace_id} workspace={workspace} open={() => open('workspace', workspace.workspace_id)} />)}</div> : <Empty title="No workspaces yet" body="Your workspace list is empty in the backend." />}</div>; }
 
-function WorkspaceDetail({ workspaceId, back, go }) { const { data: workspace, loading, error, reload } = useAsync(() => api.workspace(workspaceId), [workspaceId]); const foldersState = useAsync(() => api.folders(workspaceId), [workspaceId]); const membersState = useAsync(() => api.workspaceMembers(workspaceId), [workspaceId]); const [folderName, setFolderName] = useState(''); const [member, setMember] = useState({ user_id: '', role: 'VIEWER' }); const [notice, setNotice] = useState('');
-  const createFolder = async (event) => { event.preventDefault(); try { await api.createFolder({ workspace_id: workspaceId, folder_name: folderName, color: 'blue' }); setFolderName(''); foldersState.reload(); } catch (err) { setNotice(err.message); } };
-  const addMember = async (event) => { event.preventDefault(); try { await api.addWorkspaceMember(workspaceId, { user_id: Number(member.user_id), role: member.role }); setMember({ user_id: '', role: 'VIEWER' }); membersState.reload(); } catch (err) { setNotice(err.message); } };
-  if (error) return <ErrorState message={error} retry={reload} />; if (loading) return <Loading />;
-  return <div className="page-content"><button className="back" onClick={back}>← All workspaces</button><section className="workspace-header"><span className={`big-dot ${workspace.color}`}></span><div><p className="eyebrow">{workspace.workspace_type} · {workspace.visibility}</p><h1>{workspace.workspace_name}</h1><p>{workspace.description || 'No description provided.'}</p></div><div className="storage"><span>Storage</span><strong>{formatBytes(workspace.storage_used)} <small>of {workspace.storage_limit ? formatBytes(workspace.storage_limit) : 'unlimited'}</small></strong></div></section><section className="panel"><div className="panel-head"><div><h3>Folders</h3><p>Open a folder to view its actual files.</p></div></div><form className="compact-form" onSubmit={createFolder}><input placeholder="New folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} required /><button className="button secondary">Add folder</button></form>{notice && <div className="notice">{notice}</div>}{foldersState.error ? <ErrorState message={foldersState.error} retry={foldersState.reload} /> : foldersState.loading ? <Loading /> : foldersState.data.length ? <div className="folder-grid">{foldersState.data.map((folder) => <button className="folder-card" key={folder.folder_id} onClick={() => go('folder', folder.folder_id, workspace)}><span>▰</span><b>{folder.folder_name}</b><small>{folder.description || 'Folder'}</small></button>)}</div> : <Empty title="This workspace is empty" body="Create a folder to begin organizing files." />}</section></div>; }
+function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
+  const { data: workspace, loading, error, reload } = useAsync(() => api.workspace(workspaceId), [workspaceId]);
+  const foldersState = useAsync(() => api.folders(workspaceId), [workspaceId]);
+  const membersState = useAsync(() => api.workspaceMembers(workspaceId), [workspaceId]);
+  const [folderName, setFolderName] = useState('');
+  const [notice, setNotice] = useState('');
+  const createFolder = async (event) => {
+    event.preventDefault();
+    try {
+      await api.createFolder({ workspace_id: workspaceId, folder_name: folderName, color: 'blue' });
+      setFolderName('');
+      foldersState.reload();
+    } catch (err) {
+      setNotice(err.message);
+    }
+  };
+  if (error) return <ErrorState message={error} retry={reload} />;
+  if (loading) return <Loading />;
+  return (
+    <div className="page-content">
+      <button className="back" onClick={back}>← All workspaces</button>
+      <section className="workspace-header">
+        <span className={`big-dot ${workspace.color}`}></span>
+        <div>
+          <p className="eyebrow">{workspace.workspace_type} · {workspace.visibility} · {workspace.member_role || 'MEMBER'}</p>
+          <h1>{workspace.workspace_name}</h1>
+          <p>{workspace.description || 'No description provided.'}</p>
+        </div>
+        <div className="storage"><span>Storage</span><strong>{formatBytes(workspace.storage_used)} <small>of {workspace.storage_limit ? formatBytes(workspace.storage_limit) : 'unlimited'}</small></strong></div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><div><h3>Folders</h3><p>Open a folder to view its actual files.</p></div></div>
+        <form className="compact-form" onSubmit={createFolder}>
+          <input placeholder="New folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} required />
+          <button className="button secondary">Add folder</button>
+        </form>
+        {notice && <div className="notice">{notice}</div>}
+        {foldersState.error ? <ErrorState message={foldersState.error} retry={foldersState.reload} /> : foldersState.loading ? <Loading /> : foldersState.data.length ? (
+          <div className="folder-grid">{foldersState.data.map((folder) => <button className="folder-card" key={folder.folder_id} onClick={() => go('folder', folder.folder_id, workspace)}><span>▰</span><b>{folder.folder_name}</b><small>{folder.description || 'Folder'}</small></button>)}</div>
+        ) : <Empty title="This workspace is empty" body="Create a folder to begin organizing files." />}
+      </section>
+      <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} />
+    </div>
+  );
+}
+
+function memberDisplayName(profile, member, currentUser) {
+  if (currentUser?.user_id === member.user_id) return currentUser.full_name || currentUser.username;
+  if (profile?.full_name) return profile.full_name;
+  if (profile?.username) return profile.username;
+  return `User #${member.user_id}`;
+}
+
+function memberEmail(profile, member, currentUser) {
+  if (currentUser?.user_id === member.user_id) return currentUser.email || '';
+  return profile?.email || '';
+}
+
+function sameUserId(left, right) {
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isInteger(a) && a > 0 && a === b;
+}
+
+function isWorkspaceOwnerMember(member, workspace) {
+  return member.role === 'OWNER' || sameUserId(member.user_id, workspace?.user_id);
+}
+
+function canManageMembers(role) { return role === 'OWNER' || role === 'ADMIN'; }
+
+function roleOptionsForChange(actorRole, member, currentUserId) {
+  if (!canManageMembers(actorRole) || member.role === 'OWNER' || member.user_id === currentUserId) return [];
+  if (actorRole === 'OWNER') return ['ADMIN', 'EDITOR', 'VIEWER'];
+  if (member.role === 'ADMIN') return [];
+  return ['EDITOR', 'VIEWER'];
+}
+
+function canRemoveMember(actorRole, member, currentUserId) {
+  if (member.role === 'OWNER' || member.user_id === currentUserId) return false;
+  if (actorRole === 'OWNER') return true;
+  return actorRole === 'ADMIN' && member.role !== 'ADMIN';
+}
+
+function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel, busy }) {
+  return (
+    <div className="modal-backdrop">
+      <form className="modal" onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
+        <button type="button" className="modal-close" onClick={onCancel}>×</button>
+        <p className="eyebrow">CONFIRM</p>
+        <h3>{title}</h3>
+        <p className="muted">{body}</p>
+        <div className="confirm-actions">
+          <button type="button" className="button secondary" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="button primary" disabled={busy}>{busy ? 'Please wait…' : confirmLabel}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, onWorkspaceChanged }) {
+  const actorRole = workspace.member_role;
+  const members = membersState.data || [];
+  const memberIds = members.map((member) => member.user_id);
+  const [profiles, setProfiles] = useState({});
+  const [notice, setNotice] = useState({ text: '', tone: '' });
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [inviteRole, setInviteRole] = useState('VIEWER');
+  const [inviting, setInviting] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(null);
+  const [transferId, setTransferId] = useState('');
+  const [pendingTransfer, setPendingTransfer] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const searchTimer = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!members.length) { setProfiles({}); return undefined; }
+    Promise.all(members.map(async (member) => {
+      if (currentUser?.user_id === member.user_id) return [member.user_id, currentUser];
+      try { return [member.user_id, await api.user(member.user_id)]; }
+      catch { return [member.user_id, null]; }
+    })).then((entries) => { if (!cancelled) setProfiles(Object.fromEntries(entries)); });
+    return () => { cancelled = true; };
+  }, [membersState.data, currentUser]);
+
+  useEffect(() => () => clearTimeout(searchTimer.current), []);
+
+  const showNotice = (text, tone = '') => setNotice({ text, tone });
+
+  const runSearch = (value) => {
+    setQuery(value);
+    setResults(null);
+    clearTimeout(searchTimer.current);
+    const term = value.trim();
+    if (!term) { setSearching(false); return; }
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const users = await api.searchUsers(term);
+        setResults(users.filter((user) => !memberIds.includes(user.user_id)));
+      } catch (err) {
+        setResults([]);
+        showNotice(err.message);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  };
+
+  const invite = async (event) => {
+    event.preventDefault();
+    if (!selected) { showNotice('Select a user to add.'); return; }
+    setInviting(true);
+    showNotice('');
+    try {
+      await api.addWorkspaceMember(workspaceId, { user_id: selected.user_id, role: inviteRole });
+      setSelected(null); setQuery(''); setResults(null); setInviteRole('VIEWER');
+      showNotice(`${selected.full_name || selected.username} was added as ${inviteRole}.`, 'success');
+      await membersState.reload();
+    } catch (err) {
+      showNotice(err.message);
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const changeRole = async (member, role) => {
+    if (role === member.role) return;
+    showNotice('');
+    try {
+      await api.updateWorkspaceMember(workspaceId, member.user_id, { role });
+      showNotice('Member role updated.', 'success');
+      await membersState.reload();
+    } catch (err) {
+      showNotice(err.message);
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!pendingRemove) return;
+    setBusy(true);
+    try {
+      await api.removeWorkspaceMember(workspaceId, pendingRemove.user_id);
+      setPendingRemove(null);
+      showNotice('Member removed from this workspace.', 'success');
+      await membersState.reload();
+    } catch (err) {
+      showNotice(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmTransfer = async () => {
+    if (!pendingTransfer) return;
+    setBusy(true);
+    try {
+      await api.transferWorkspaceOwnership(workspaceId, { user_id: pendingTransfer.user_id });
+      setPendingTransfer(null);
+      setTransferId('');
+      showNotice('Ownership transferred. You are now an ADMIN.', 'success');
+      await Promise.all([onWorkspaceChanged(), membersState.reload()]);
+    } catch (err) {
+      showNotice(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const transferCandidates = members.filter((member) => !isWorkspaceOwnerMember(member, workspace));
+  const selectedTransfer = transferCandidates.find((member) => sameUserId(member.user_id, transferId));
+
+  return (
+    <section className="panel members-panel">
+      <div className="panel-head">
+        <div>
+          <h3>Members</h3>
+          <p>People who can access this workspace, and the role assigned to each of them.</p>
+        </div>
+      </div>
+      {notice.text && <div className={`notice ${notice.tone}`}>{notice.text}</div>}
+      {canManageMembers(actorRole) && (
+        <form className="inline-form" onSubmit={invite}>
+          <Field label="Search AETHERA users" value={query} onChange={runSearch} placeholder="Search by name or username" />
+          <label className="field">
+            <span>Role</span>
+            <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}>
+              <option value="EDITOR">EDITOR</option>
+              <option value="VIEWER">VIEWER</option>
+            </select>
+          </label>
+          <div className="invite-search">
+            {selected && (
+              <div className="selected-user">
+                <span><b>{selected.full_name}</b> @{selected.username}</span>
+                <button type="button" className="text-button" onClick={() => setSelected(null)}>Clear</button>
+              </div>
+            )}
+            {searching && <div className="loading">Searching users…</div>}
+            {!searching && query.trim() && results?.length === 0 && <p className="muted">No users match that search, or they are already members.</p>}
+            {!searching && results?.length > 0 && (
+              <div className="search-results">
+                {results.map((user) => (
+                  <button type="button" className={`search-result ${selected?.user_id === user.user_id ? 'selected' : ''}`} key={user.user_id} onClick={() => setSelected(user)}>
+                    <span><b>{user.full_name}</b><small className="muted"> @{user.username}</small></span>
+                    <span className="muted">{user.account_type}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="button primary" disabled={inviting || !selected}>{inviting ? 'Adding…' : 'Add member'}</button>
+        </form>
+      )}
+      {actorRole === 'OWNER' && (
+        <form className="compact-form" onSubmit={(event) => { event.preventDefault(); if (selectedTransfer) setPendingTransfer(selectedTransfer); }}>
+          <select value={transferId} onChange={(event) => setTransferId(event.target.value)} required disabled={!transferCandidates.length}>
+            <option value="">{transferCandidates.length ? 'Transfer ownership to…' : 'No eligible members'}</option>
+            {transferCandidates.map((member) => (
+              <option value={member.user_id} key={member.user_id}>
+                {memberDisplayName(profiles[member.user_id], member, currentUser)} ({member.role})
+              </option>
+            ))}
+          </select>
+          <button className="button secondary" disabled={!transferCandidates.length}>Transfer ownership</button>
+        </form>
+      )}
+      {actorRole === 'OWNER' && !transferCandidates.length && (
+        <p className="muted">Ownership can only be transferred to another existing member. Add a member first.</p>
+      )}
+      {membersState.error ? <ErrorState message={membersState.error} retry={membersState.reload} /> : membersState.loading ? <Loading /> : members.length ? (
+        <div className="file-table member-table">
+          <div className="table-head"><span>Member</span><span>Email</span><span>Role</span><span></span></div>
+          {members.map((member) => {
+            const profile = profiles[member.user_id];
+            const options = roleOptionsForChange(actorRole, member, currentUser?.user_id);
+            const removable = canRemoveMember(actorRole, member, currentUser?.user_id);
+            return (
+              <div className="file-row" key={member.member_id}>
+                <span><b>◎</b> {memberDisplayName(profile, member, currentUser)}{currentUser?.user_id === member.user_id ? ' (you)' : ''}{profile?.username ? <small className="muted"> @{profile.username}</small> : null}</span>
+                <span>{memberEmail(profile, member, currentUser) || '—'}</span>
+                <span>{member.role}</span>
+                <div className="member-actions">
+                  {options.length > 0 && (
+                    <select aria-label={`Change role for ${memberDisplayName(profile, member, currentUser)}`} value={member.role} onChange={(event) => changeRole(member, event.target.value)}>
+                      {options.map((role) => <option value={role} key={role}>{role}</option>)}
+                    </select>
+                  )}
+                  {removable && <button type="button" className="text-button danger" onClick={() => setPendingRemove(member)}>Remove</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : <Empty title="No members yet" body="This workspace has no members in the backend." />}
+      {pendingRemove && (
+        <ConfirmDialog
+          title={`Remove ${memberDisplayName(profiles[pendingRemove.user_id], pendingRemove, currentUser)}?`}
+          body="They will lose access to this workspace. You can add them again later."
+          confirmLabel="Remove member"
+          busy={busy}
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={confirmRemove}
+        />
+      )}
+      {pendingTransfer && (
+        <ConfirmDialog
+          title="Transfer ownership?"
+          body="You will become an ADMIN and the selected member will become the OWNER."
+          confirmLabel="Transfer ownership"
+          busy={busy}
+          onCancel={() => setPendingTransfer(null)}
+          onConfirm={confirmTransfer}
+        />
+      )}
+    </section>
+  );
+}
 
  function FolderBrowser({ folderId, workspace, back, go }) { const { data: folder, loading: folderLoading, error: folderError } = useAsync(() => api.folders(workspace.workspace_id).then((all) => all.find((item) => item.folder_id === folderId)), [folderId, workspace.workspace_id]); const filesState = useAsync(() => api.files(folderId), [folderId]); const [selected, setSelected] = useState(null); const [uploading, setUploading] = useState(false);
   const upload = async (event) => { const file = event.target.files?.[0]; if (!file) return; setUploading(true); try { await api.uploadFile(folderId, file); filesState.reload(); } catch (error) { alert(error.message); } finally { setUploading(false); event.target.value = ''; } };
@@ -84,6 +401,6 @@ function Profile({ onUserChange }) { const state = useAsync(api.me, []); const [
 export default function App() { const [authenticated, setAuthenticated] = useState(Boolean(authStore.token)); const [page, setPage] = useState('dashboard'); const [params, setParams] = useState({}); const [user, setUser] = useState(null); const [oauthError, setOauthError] = useState(''); const googleHandoffStarted = useRef(false); const me = useAsync(() => authenticated ? api.me() : Promise.resolve(null), [authenticated]); useEffect(() => { if (me.data) setUser(me.data); }, [me.data]); useEffect(() => { const handler = () => setAuthenticated(false); window.addEventListener('aethera:unauthorized', handler); return () => window.removeEventListener('aethera:unauthorized', handler); }, []); useEffect(() => { const handoffCode = new URLSearchParams(window.location.search).get('oauth_code'); if (!handoffCode || googleHandoffStarted.current) return; googleHandoffStarted.current = true; api.exchangeGoogleOAuthCode(handoffCode).then((tokens) => { authStore.set(tokens); setAuthenticated(true); }).catch((error) => setOauthError(error.message || 'Google sign-in could not be completed.')).finally(() => window.history.replaceState({}, document.title, window.location.pathname)); }, []);
   const go = (next, id, workspace) => { setPage(next); setParams({ id, workspace }); }; const logout = async () => { try { await api.logout(); } catch (_) {} authStore.clear(); setAuthenticated(false); setPage('dashboard'); };
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} oauthError={oauthError} />;
-  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
+  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
   return <AppShell page={page} setPage={setPage} onLogout={logout} user={user}>{content}</AppShell>;
 }
