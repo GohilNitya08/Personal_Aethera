@@ -129,7 +129,7 @@ class FolderService:
     def delete_folder(self, folder_id: int, actor_id: int) -> None:
         """Soft-delete an active folder and all of its descendants."""
         folder = self._require_folder(folder_id, include_archived=False)
-        self._require_folder_manager(folder, actor_id)
+        self._require_folder_deleter(folder, actor_id)
         subtree_ids = self._subtree_ids(folder_id)
         try:
             if self._repository.set_archived(subtree_ids, is_archived=True) < 1:
@@ -144,7 +144,7 @@ class FolderService:
         folder = self._require_folder(folder_id, include_archived=True)
         if not folder.is_archived:
             return self.get_folder(folder_id, actor_id)
-        self._require_folder_manager(folder, actor_id)
+        self._require_folder_deleter(folder, actor_id)
         if folder.parent_folder_id is not None:
             parent = self._repository.get_by_id(
                 folder.parent_folder_id, include_archived=False
@@ -214,9 +214,7 @@ class FolderService:
         return role
 
     def _require_folder_manager(self, folder: Folder, actor_id: int) -> None:
-        role = self._require_workspace_writer(folder.workspace_id, actor_id)
-        if role == "EDITOR" and folder.created_by != actor_id:
-            raise FolderPermissionError
+        self._require_workspace_writer(folder.workspace_id, actor_id)
 
     def _validate_parent(self, *, workspace_id: int, parent_folder_id: int | None) -> None:
         if parent_folder_id is None:

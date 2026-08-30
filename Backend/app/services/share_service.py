@@ -194,11 +194,24 @@ class ShareService:
             if payload.link_password is not None:
                 raise ShareValidationError("Only LINK shares can have a link password")
             self._ensure_active_user(payload.shared_with)
+            self._ensure_same_workspace_member(payload.file_id, payload.shared_with, actor_id)
             return
         if payload.shared_with is not None:
             raise ShareValidationError("PUBLIC and LINK shares cannot specify shared_with")
         if payload.share_type == "PUBLIC" and payload.link_password is not None:
             raise ShareValidationError("Only LINK shares can have a link password")
+
+    def _ensure_same_workspace_member(
+        self, file_id: int, target_user_id: int, actor_id: int
+    ) -> None:
+        file = self._file_service.get_file(file_id, actor_id)
+        folder = self._folder_service.get_folder(file.folder_id, actor_id)
+        try:
+            self._workspace_service.get_workspace(folder.workspace_id, target_user_id)
+        except (WorkspaceNotFoundError, WorkspacePermissionError) as error:
+            raise ShareValidationError(
+                "Share recipients must be active members of the same workspace"
+            ) from error
 
     def _update_changes(
         self, share: FileShare, payload: ShareUpdateRequest

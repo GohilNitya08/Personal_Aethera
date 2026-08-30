@@ -177,7 +177,7 @@ class FileService:
     def delete_file(self, file_id: int, actor_id: int) -> None:
         """Soft-delete a managed file through the existing ``is_deleted`` field."""
         file, folder = self._get_file_and_folder(file_id, actor_id, include_deleted=False)
-        self._require_file_manager(file, folder, actor_id)
+        self._require_file_deleter(file, folder, actor_id)
         try:
             if not self._repository.set_deleted(file_id, is_deleted=True):
                 raise FileNotFoundError
@@ -197,7 +197,7 @@ class FileService:
         file, folder = self._get_file_and_folder(file_id, actor_id, include_deleted=True)
         if not file.is_deleted:
             return file
-        self._require_file_manager(file, folder, actor_id)
+        self._require_file_deleter(file, folder, actor_id)
         try:
             if not self._repository.set_deleted(file_id, is_deleted=False):
                 raise FileNotFoundError
@@ -315,8 +315,11 @@ class FileService:
         return role
 
     def _require_file_manager(self, file: FileRecord, folder: Folder, actor_id: int) -> None:
-        role = self._require_writer(folder, actor_id)
-        if role == "EDITOR" and file.uploaded_by != actor_id:
+        self._require_writer(folder, actor_id)
+
+    def _require_file_deleter(self, file: FileRecord, folder: Folder, actor_id: int) -> None:
+        role = self._workspace_role(folder, actor_id)
+        if role not in {"OWNER", "ADMIN"}:
             raise FilePermissionError
 
     def _workspace_role(self, folder: Folder, actor_id: int) -> str:
