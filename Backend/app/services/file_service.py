@@ -20,11 +20,12 @@ from app.services.folder_service import (
     FolderService,
 )
 from app.services.workspace_service import (
+    WorkspaceConflictError,
     WorkspaceNotFoundError,
     WorkspacePermissionError,
     WorkspaceService,
 )
-from app.services.storage_service import CloudStorageService
+from app.services.storage_service import ObjectStorage
 
 
 class FileError(Exception):
@@ -57,7 +58,12 @@ class FileService:
         self._workspace_service = workspace_service
 
     def create_file(self, actor_id: int, payload: FileCreateRequest) -> FileRecord:
-        """Create file metadata in an active folder the caller can write to."""
+        """Create legacy metadata in an active writable folder.
+
+        This pre-existing endpoint does not upload bytes and therefore still accepts
+        its storage fields from trusted legacy callers. Real multipart uploads use
+        :meth:`upload_file`, where those fields are server controlled.
+        """
         folder = self._get_active_folder(payload.folder_id, actor_id)
         self._require_writer(folder, actor_id)
         values = payload.model_dump()
@@ -81,7 +87,7 @@ class FileService:
 
     def upload_file(
         self, actor_id: int, folder_id: int, upload: UploadFile,
-        storage: CloudStorageService,
+        storage: ObjectStorage,
     ) -> FileRecord:
         """Upload bytes privately before creating the corresponding metadata."""
         folder = self._get_active_folder(folder_id, actor_id)
@@ -99,8 +105,7 @@ class FileService:
                 raise FileConflictError("File exceeds the configured upload size limit")
             digest.update(chunk)
         upload.file.seek(0)
-        object_key = f"{settings.gcs_object_prefix.rstrip('/')}/{folder.workspace_id}/{uuid.uuid4()}-{original_name}"
-        storage.upload(upload.file, object_key, upload.content_type)
+        object_key = self._object_key(folder.workspace_id, folder_id)
         values = {
             "folder_id": folder_id,
             "file_name": original_name,
@@ -113,7 +118,17 @@ class FileService:
             "ai_enabled": False,
             "uploaded_by": actor_id,
         }
+        object_uploaded = False
         try:
+            # This conditional update is the quota reservation. It is in the same
+            # DB transaction as file metadata, so a concurrent upload cannot exceed
+            # the workspace limit.
+            try:
+                self._workspace_service.reserve_storage(folder.workspace_id, actor_id, size)
+            except WorkspaceConflictError as error:
+                raise FileConflictError("Workspace storage quota exceeded") from error
+            storage.upload(upload.file, object_key, upload.content_type)
+            object_uploaded = True
             file_id = self._repository.create_file(values)
             self._repository.record_activity(
                 user_id=actor_id, file_id=file_id, activity_type="FILE_UPLOADED",
@@ -122,15 +137,23 @@ class FileService:
             self._repository.commit()
         except Exception:
             self._repository.rollback()
-            try:
-                storage.delete(object_key)
-            except Exception:
-                pass
+            # Only clean up after a successful object upload. Cleanup remains best
+            # effort because the original error is the one the caller must receive.
+            if object_uploaded:
+                try:
+                    storage.delete(object_key)
+                except Exception:
+                    pass
             raise
         file = self._repository.get_by_id(file_id, user_id=actor_id, include_deleted=False)
         if file is None:
             raise RuntimeError("Created file could not be loaded")
         return file
+
+    def get_download_url(self, file_id: int, actor_id: int, storage: ObjectStorage) -> str:
+        """Return private temporary access only after normal workspace authorization."""
+        file, _ = self._get_file_and_folder(file_id, actor_id, include_deleted=False)
+        return storage.temporary_download_url(file.storage_path)
 
     def list_files(
         self, folder_id: int, actor_id: int, *, include_deleted: bool
@@ -221,7 +244,12 @@ class FileService:
     def create_version(
         self, file_id: int, actor_id: int, payload: FileVersionCreateRequest
     ) -> FileVersion:
-        """Create the next sequential version metadata for a managed file."""
+        """Create the next sequential legacy version-metadata record.
+
+        Version byte uploads are not part of Phase 2A, so this established endpoint
+        retains its client-supplied storage metadata until a version upload flow is
+        introduced separately.
+        """
         file, folder = self._get_file_and_folder(file_id, actor_id, include_deleted=False)
         self._require_file_manager(file, folder, actor_id)
         version_number = self._repository.next_version_number(file_id)
@@ -332,3 +360,8 @@ class FileService:
         if workspace.member_role is None:
             raise FilePermissionError
         return workspace.member_role
+
+    @staticmethod
+    def _object_key(workspace_id: int, folder_id: int) -> str:
+        """Build the stable, server-owned key for a multipart upload."""
+        return f"workspaces/{workspace_id}/folders/{folder_id}/{uuid.uuid4()}"

@@ -266,6 +266,23 @@ class WorkspaceRepository:
         )
         return result.rowcount == 1
 
+    def reserve_storage(self, workspace_id: int, byte_count: int) -> bool:
+        """Atomically reserve bytes only when the workspace quota permits it."""
+        if byte_count < 0:
+            raise ValueError("byte_count must be non-negative")
+        result = self._db.execute(
+            text(
+                """
+                UPDATE workspaces
+                SET storage_used = storage_used + :byte_count, updated_at = UTC_TIMESTAMP()
+                WHERE workspace_id = :workspace_id
+                  AND storage_used + :byte_count <= storage_limit
+                """
+            ),
+            {"workspace_id": workspace_id, "byte_count": byte_count},
+        )
+        return result.rowcount == 1
+
     def set_archived(self, workspace_id: int, *, is_archived: bool) -> bool:
         """Set the existing archive flag on a workspace."""
         result = self._db.execute(

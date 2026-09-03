@@ -15,6 +15,7 @@ from app.repositories.auth_repository import AuthUser
 from app.repositories.file_repository import FileRecord, FileRepository, FileVersion
 from app.schemas.file import (
     FileCreateRequest,
+    FileDownloadResponse,
     FileResponse,
     FileUpdateRequest,
     FileVersionCreateRequest,
@@ -28,7 +29,13 @@ from app.services.file_service import (
 )
 from app.services.folder_service import FolderService
 from app.services.workspace_service import WorkspaceService
-from app.services.storage_service import CloudStorageService, StorageNotConfiguredError, StorageUploadError
+from app.services.storage_service import (
+    CloudStorageService,
+    ObjectStorage,
+    StorageDownloadError,
+    StorageNotConfiguredError,
+    StorageUploadError,
+)
 
 router = APIRouter(tags=["files"])
 FileId = Annotated[int, Path(gt=0)]
@@ -44,7 +51,7 @@ def get_file_service(
     return FileService(FileRepository(db), folder_service, workspace_service)
 
 
-def get_storage_service() -> CloudStorageService:
+def get_storage_service() -> ObjectStorage:
     return CloudStorageService()
 
 
@@ -59,7 +66,7 @@ def upload_file(
     upload: Annotated[UploadFile, File(...)],
     current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
     service: Annotated[FileService, Depends(get_file_service)],
-    storage: Annotated[CloudStorageService, Depends(get_storage_service)],
+    storage: Annotated[ObjectStorage, Depends(get_storage_service)],
 ) -> FileResponse:
     try:
         file = service.upload_file(current_user.user_id, folder_id, upload, storage)
@@ -70,6 +77,30 @@ def upload_file(
     except StorageUploadError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return _file_response(file)
+
+
+@router.get(
+    "/files/{file_id}/download",
+    response_model=FileDownloadResponse,
+    summary="Get temporary private download access",
+)
+def download_file(
+    file_id: FileId,
+    current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+    storage: Annotated[ObjectStorage, Depends(get_storage_service)],
+) -> FileDownloadResponse:
+    """Authorize workspace access before issuing a short-lived storage URL."""
+    try:
+        return FileDownloadResponse(
+            download_url=service.get_download_url(file_id, current_user.user_id, storage)
+        )
+    except (FileNotFoundError, FilePermissionError) as error:
+        raise _file_http_exception(error) from error
+    except StorageNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except StorageDownloadError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 
 @router.post(

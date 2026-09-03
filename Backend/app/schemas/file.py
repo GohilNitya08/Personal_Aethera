@@ -62,6 +62,12 @@ class FileVersionCreateRequest(BaseModel):
     version_note: VersionNote | None = None
 
 
+class FileDownloadResponse(BaseModel):
+    """Time-limited private access to an authorized file object."""
+
+    download_url: str
+
+
 class FileResponse(BaseModel):
     """File metadata visible to a caller with workspace access."""
 

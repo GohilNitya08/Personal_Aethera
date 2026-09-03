@@ -83,6 +83,12 @@ class WorkspaceService:
         workspace, role = self._require_access(workspace_id, user_id)
         return self._with_role(workspace, role)
 
+    def reserve_storage(self, workspace_id: int, actor_id: int, byte_count: int) -> None:
+        """Reserve workspace storage in the current transaction for a writer upload."""
+        self._require_access(workspace_id, actor_id)
+        if not self._repository.reserve_storage(workspace_id, byte_count):
+            raise WorkspaceConflictError("Workspace storage quota exceeded")
+
     def update_workspace(
         self, workspace_id: int, actor_id: int, payload: WorkspaceUpdateRequest
     ) -> Workspace:
