@@ -152,6 +152,20 @@ class AuthRepository:
         )
         return result.rowcount == 1
 
+    def mark_email_verified(self, user_id: int) -> bool:
+        """Set email_verified after a successful OTP verification."""
+        result = self._db.execute(
+            text(
+                """
+                UPDATE users
+                SET email_verified = TRUE
+                WHERE user_id = :user_id AND email_verified = FALSE
+                """
+            ),
+            {"user_id": user_id},
+        )
+        return result.rowcount == 1
+
     def update_last_login(self, user_id: int) -> None:
         """Record a successful login using the database server timestamp."""
         self._db.execute(

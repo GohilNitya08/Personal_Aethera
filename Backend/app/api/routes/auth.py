@@ -15,10 +15,13 @@ from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
+from app.api.routes.users import get_current_auth_user
+
 from app.core.config import settings
 from app.database.session import get_db
 from app.repositories.auth_repository import AuthRepository, AuthUser
 from app.schemas.auth import (
+    ChallengeResponse,
     ForgotPasswordRequest,
     GoogleOAuthExchangeRequest,
     LoginRequest,
@@ -28,15 +31,18 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     PasswordResetTokenResponse,
     TokenResponse,
+    VerifyEmailRequest,
     VerifyPasswordResetOtpRequest,
     UserResponse,
 )
 from app.services.auth_service import (
     AccessToken,
+    AuthError,
     AuthService,
     AuthTokens,
     DuplicateEmailError,
     DuplicateUsernameError,
+    EmailNotVerifiedError,
     GoogleOAuthError,
     GoogleOAuthNotConfiguredError,
     InactiveAccountError,
@@ -45,6 +51,7 @@ from app.services.auth_service import (
     UserNotFoundError,
 )
 from app.services.email_service import EmailDeliveryError, EmailNotConfiguredError
+from app.services.otp_service import OtpCooldownError
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -126,6 +133,11 @@ def login(
     """Authenticate the user and return a JWT access and refresh token pair."""
     try:
         tokens = service.login(email=str(payload.email), password=payload.password)
+    except EmailNotVerifiedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address has not been verified",
+        ) from error
     except InvalidCredentialsError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -171,23 +183,26 @@ def refresh_access_token(
 
 @router.post(
     "/forgot-password",
-    response_model=MessageResponse,
+    response_model=ChallengeResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Request a password reset",
 )
 def forgot_password(
     payload: ForgotPasswordRequest,
     service: Annotated[AuthService, Depends(get_auth_service)],
-) -> MessageResponse:
+) -> ChallengeResponse:
     """Accept a password-reset request without disclosing account existence."""
     try:
-        service.request_password_reset(str(payload.email))
+        challenge = service.request_password_reset(str(payload.email))
+    except OtpCooldownError as error:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(error)) from error
     except EmailNotConfiguredError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except EmailDeliveryError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
-    return MessageResponse(
-        message="If an account exists, password reset instructions will be sent."
+    return ChallengeResponse(
+        message="If an account exists, password reset instructions will be sent.",
+        challenge=challenge,
     )
 
 
@@ -231,14 +246,56 @@ def reset_password(
     return MessageResponse(message="Password reset successfully")
 
 
-@router.get("/verify-email", response_model=MessageResponse, summary="Verify an email address")
-def verify_email(token: Annotated[str | None, Query()] = None) -> MessageResponse:
-    """Reserve the email-verification URL until email delivery is integrated."""
-    del token
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Email verification is not configured yet",
+@router.post(
+    "/request-email-verification",
+    response_model=ChallengeResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request an email verification code",
+)
+def request_email_verification(
+    current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> ChallengeResponse:
+    """Send a verification OTP to the authenticated user's email address."""
+    try:
+        challenge = service.request_email_verification(current_user.user_id)
+    except AuthError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except OtpCooldownError as error:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(error)) from error
+    except EmailNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except EmailDeliveryError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return ChallengeResponse(
+        message="Verification code sent to your email address",
+        challenge=challenge,
     )
+
+
+@router.post(
+    "/verify-email",
+    response_model=MessageResponse,
+    summary="Verify an email address",
+)
+def verify_email(
+    payload: VerifyEmailRequest,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> MessageResponse:
+    """Consume a valid email-verification OTP and mark the address verified."""
+    try:
+        service.verify_email(payload.challenge, payload.otp)
+    except (InvalidTokenError, UserNotFoundError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired verification code",
+        ) from error
+    except (AuthError, InactiveAccountError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(error),
+        ) from error
+    return MessageResponse(message="Email verified successfully")
 
 
 @router.get("/google/login", summary="Start Google sign-in")

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import re
+import secrets
 from typing import Any
 
 import httpx
@@ -18,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.repositories.auth_repository import AuthRepository, AuthUser
 from app.services.email_service import EmailDeliveryError, EmailNotConfiguredError, EmailService
-from app.services.otp_service import OtpService
+from app.services.otp_service import OtpCooldownError, OtpService
 
 PASSWORD_CONTEXT = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _otp_service = OtpService()
@@ -296,21 +297,23 @@ class AuthService:
             access_token_expires_in=settings.jwt_access_token_expire_minutes * 60,
         )
 
-    def request_password_reset(self, email: str) -> None:
+    def request_password_reset(self, email: str) -> str:
         """Issue and email an OTP without disclosing whether an account exists."""
         user = self._repository.get_by_email(email.lower())
         if user is not None and user.account_status == "ACTIVE":
-            challenge, otp = self._otp_service.issue(user.user_id)
+            challenge, otp = self._otp_service.issue(user.user_id, purpose="password_reset")
             try:
                 self._email_service.send_password_reset_otp(user.email, otp)
             except (EmailNotConfiguredError, EmailDeliveryError):
                 self._otp_service.consume(challenge)
                 raise
+            return challenge
+        return secrets.token_urlsafe(32)
 
     def verify_password_reset_otp(self, challenge: str, otp: str) -> str:
         """Consume a valid OTP and issue a short-lived reset token."""
         try:
-            user_id = self._otp_service.verify(challenge, otp)
+            user_id = self._otp_service.verify(challenge, otp, purpose="password_reset")
         except ValueError as error:
             raise InvalidTokenError from error
         user = self._repository.get_by_id(user_id)
@@ -328,6 +331,38 @@ class AuthService:
             self._repository.rollback()
             raise UserNotFoundError
         self._repository.commit()
+
+    def request_email_verification(self, user_id: int) -> str:
+        """Issue an email-verification OTP and send it to the user's address."""
+        user = self._repository.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError
+        self._ensure_active(user)
+        if user.email_verified:
+            raise AuthError("Email is already verified")
+        challenge, otp = self._otp_service.issue(user.user_id, purpose="email_verification")
+        try:
+            self._email_service.send_email_verification_otp(user.email, otp)
+        except (EmailNotConfiguredError, EmailDeliveryError):
+            self._otp_service.consume(challenge)
+            raise
+        return challenge
+
+    def verify_email(self, challenge: str, otp: str) -> None:
+        """Consume a valid email-verification OTP and mark the address verified."""
+        try:
+            user_id = self._otp_service.verify(challenge, otp, purpose="email_verification")
+        except ValueError as error:
+            raise InvalidTokenError from error
+        user = self._repository.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError
+        self._ensure_active(user)
+        if not self._repository.mark_email_verified(user_id):
+            self._repository.rollback()
+            raise AuthError("Email could not be verified")
+        self._repository.commit()
+
 
     @staticmethod
     def logout() -> None:

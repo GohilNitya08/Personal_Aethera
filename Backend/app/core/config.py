@@ -35,10 +35,11 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, gt=0, le=65535)
     smtp_username: str = ""
     smtp_password: str = ""
-    smtp_from_email: str = ""
+    smtp_from: str = ""
     smtp_use_tls: bool = True
     password_reset_otp_expire_minutes: int = Field(default=10, gt=0, le=60)
     password_reset_otp_max_attempts: int = Field(default=5, gt=0, le=20)
+    otp_resend_cooldown_seconds: int = Field(default=60, gt=0, le=300)
 
     jwt_secret_key: str = DEVELOPMENT_JWT_SECRET
     jwt_algorithm: str = "HS256"

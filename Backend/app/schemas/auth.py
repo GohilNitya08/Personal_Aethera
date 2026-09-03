@@ -109,6 +109,15 @@ class VerifyPasswordResetOtpRequest(BaseModel):
     otp: str = Field(pattern=r"^[0-9]{6}$")
 
 
+class VerifyEmailRequest(BaseModel):
+    """One-time challenge and code supplied by the email verification client."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    challenge: str = Field(min_length=32, max_length=256)
+    otp: str = Field(pattern=r"^[0-9]{6}$")
+
+
 class PasswordResetTokenResponse(BaseModel):
     """Short-lived token returned after successful OTP verification."""
 
@@ -142,3 +151,10 @@ class MessageResponse(BaseModel):
     """A standard success response for operations without a resource body."""
 
     message: str
+
+
+class ChallengeResponse(BaseModel):
+    """A success response containing an opaque challenge for OTP verification."""
+
+    message: str
+    challenge: str
