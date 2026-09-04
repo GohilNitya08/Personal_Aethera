@@ -44,16 +44,70 @@ function AuthScreen({ onAuthenticated, oauthError }) {
       else { const tokens = await api.login({ email: form.email, password: form.password }); authStore.set(tokens); onAuthenticated(); }
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
-    const resetMode = ['forgot', 'verify', 'reset'].includes(mode);
-    return <main className="auth-shell"><section className="auth-intro"><div className="brand"><span>✦</span> AETHERA</div><div><p className="eyebrow">PRIVATE BY DESIGN</p><h1>Your work,<br />calmly organized.</h1><p>Secure, intelligent storage and collaboration for the things that matter.</p></div><div className="intro-card"><span>◈</span><p>One place for your documents, projects, and shared workspaces.</p></div></section><section className="auth-panel"><form onSubmit={submit} className="auth-card"><p className="eyebrow">WELCOME TO AETHERA</p><h2>{mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : mode === 'verify' || mode === 'email-verify' ? 'Enter your code' : 'Choose a new password'}</h2><p className="muted">{mode === 'login' ? 'Continue to your secure workspace.' : mode === 'email-verify' ? 'Enter the code sent to your email address.' : 'Secure account recovery for AETHERA.'}</p>{(oauthError || error) && <div className="notice">{oauthError || error}</div>}
-      {['login', 'register', 'forgot'].includes(mode) && <>{<Field label="Email address" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required />}{mode === 'register' && emailStatus && <small className={`email-status ${emailStatus}`}>{emailStatus === 'checking' ? 'Checking...' : emailStatus === 'available' ? 'Email available' : 'Email already registered'}</small>}</>}
-      {mode === 'register' && <><Field label="Full name" value={form.full_name} onChange={(full_name) => setForm({ ...form, full_name })} required /><Field label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} required /><Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required minLength={8} /></>}
-      {mode === 'login' && <Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required minLength={1} />}
-      {(mode === 'verify' || mode === 'email-verify') && <Field label="6-digit code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={form.otp} onChange={(otp) => setForm({ ...form, otp })} required />}
-      {mode === 'reset' && <Field label="New password" type="password" value={form.new_password} onChange={(new_password) => setForm({ ...form, new_password })} required minLength={8} />}
-      <button className="button primary" disabled={loading || (mode === 'register' && emailStatus !== 'available')}>{loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset code' : mode === 'verify' || mode === 'email-verify' ? 'Verify code' : 'Reset password'}</button>
-      {mode === 'login' && <><div className="divider"><span>or</span></div><a className="button google" href={`${API_BASE_URL}/auth/google/login`}><b>G</b> Continue with Google</a><p className="switch"><button type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></p></>}
-      <p className="switch"><button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Back to sign in'}</button></p></form></section></main>;
+  const isRegister = mode === 'register';
+  const frontMode = isRegister ? 'login' : mode;
+  const frontTitle = frontMode === 'login' ? 'Sign in' : frontMode === 'forgot' ? 'Reset your password' : frontMode === 'verify' || frontMode === 'email-verify' ? 'Enter your code' : 'Choose a new password';
+  const frontMuted = frontMode === 'login' ? 'Continue to your secure workspace.' : frontMode === 'email-verify' ? 'Enter the code sent to your email address.' : 'Secure account recovery for AETHERA.';
+  const frontCta = loading ? 'Please wait…' : frontMode === 'login' ? 'Sign in' : frontMode === 'forgot' ? 'Send reset code' : frontMode === 'verify' || frontMode === 'email-verify' ? 'Verify code' : 'Reset password';
+  const goRegister = () => { setMode('register'); setError(''); };
+  const goLogin = () => { setMode('login'); setError(''); };
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-intro">
+        <div className="brand"><span>✦</span> AETHERA</div>
+        <div>
+          <p className="eyebrow">PRIVATE BY DESIGN</p>
+          <h1>Your work,<br />calmly organized.</h1>
+          <p>Secure, intelligent storage and collaboration for the things that matter.</p>
+        </div>
+        <div className="intro-card"><span>◈</span><p>One place for your documents, projects, and shared workspaces.</p></div>
+      </section>
+      <section className="auth-panel">
+        <div className={`auth-scene${isRegister ? ' is-flipped' : ''}`}>
+          <div className="auth-flip">
+            <form onSubmit={submit} className="auth-card auth-face auth-face-front" aria-hidden={isRegister}>
+              <p className="eyebrow">WELCOME TO AETHERA</p>
+              <h2>{frontTitle}</h2>
+              <p className="muted">{frontMuted}</p>
+              {(oauthError || (!isRegister && error)) && <div className="notice">{oauthError || error}</div>}
+              {['login', 'forgot'].includes(frontMode) && <Field label="Email address" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required={!isRegister} />}
+              {frontMode === 'login' && <Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required={!isRegister} minLength={1} />}
+              {(frontMode === 'verify' || frontMode === 'email-verify') && <Field label="6-digit code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={form.otp} onChange={(otp) => setForm({ ...form, otp })} required={!isRegister} />}
+              {frontMode === 'reset' && <Field label="New password" type="password" value={form.new_password} onChange={(new_password) => setForm({ ...form, new_password })} required={!isRegister} minLength={8} />}
+              <button className="button primary" disabled={loading || isRegister}>{frontCta}</button>
+              {frontMode === 'login' && (
+                <>
+                  <div className="divider"><span>or</span></div>
+                  <a className="button google" href={`${API_BASE_URL}/auth/google/login`} tabIndex={isRegister ? -1 : undefined}><b>G</b> Continue with Google</a>
+                  <p className="switch"><button type="button" onClick={() => { setMode('forgot'); setError(''); }} tabIndex={isRegister ? -1 : undefined}>Forgot password?</button></p>
+                </>
+              )}
+              <p className="switch">
+                <button type="button" onClick={frontMode === 'login' ? goRegister : goLogin} tabIndex={isRegister ? -1 : undefined}>
+                  {frontMode === 'login' ? 'Create an account' : 'Back to sign in'}
+                </button>
+              </p>
+            </form>
+
+            <form onSubmit={submit} className="auth-card auth-face auth-face-back" aria-hidden={!isRegister}>
+              <p className="eyebrow">WELCOME TO AETHERA</p>
+              <h2>Create your account</h2>
+              <p className="muted">Join AETHERA with a secure personal account.</p>
+              {isRegister && error && <div className="notice">{error}</div>}
+              <Field label="Email address" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required={isRegister} />
+              {emailStatus && <small className={`email-status ${emailStatus}`}>{emailStatus === 'checking' ? 'Checking...' : emailStatus === 'available' ? 'Email available' : 'Email already registered'}</small>}
+              <Field label="Full name" value={form.full_name} onChange={(full_name) => setForm({ ...form, full_name })} required={isRegister} />
+              <Field label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} required={isRegister} />
+              <Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required={isRegister} minLength={8} />
+              <button className="button primary" disabled={loading || !isRegister || emailStatus !== 'available'}>{loading ? 'Please wait…' : 'Create account'}</button>
+              <p className="switch"><button type="button" onClick={goLogin} tabIndex={!isRegister ? -1 : undefined}>Back to sign in</button></p>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
 }
 
 function Field({ label, onChange, ...props }) { return <label className="field"><span>{label}</span><input onChange={(e) => onChange(e.target.value)} {...props} /></label>; }
