@@ -22,6 +22,7 @@ from app.database.session import get_db
 from app.repositories.auth_repository import AuthRepository, AuthUser
 from app.schemas.auth import (
     ChallengeResponse,
+    EmailAvailabilityResponse,
     ForgotPasswordRequest,
     GoogleOAuthExchangeRequest,
     LoginRequest,
@@ -96,15 +97,15 @@ def get_auth_service(db: Annotated[Session, Depends(get_db)]) -> AuthService:
 
 @router.post(
     "/register",
-    response_model=UserResponse,
+    response_model=ChallengeResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new account",
 )
 def register(
     payload: RegisterRequest,
     service: Annotated[AuthService, Depends(get_auth_service)],
-) -> UserResponse:
-    """Create an account after validating uniqueness and hashing its password."""
+) -> ChallengeResponse:
+    """Create an account and immediately send its email-verification OTP."""
     try:
         user = service.register(
             username=payload.username,
@@ -112,6 +113,7 @@ def register(
             email=str(payload.email),
             password=payload.password,
         )
+        challenge = service.request_email_verification(user.user_id)
     except DuplicateEmailError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -122,7 +124,38 @@ def register(
             status_code=status.HTTP_409_CONFLICT,
             detail="This username is already in use",
         ) from error
-    return _user_response(user)
+    except OtpCooldownError as error:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(error)) from error
+    except EmailNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except EmailDeliveryError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return ChallengeResponse(
+        message="Verification code sent to your email address",
+        challenge=challenge,
+    )
+
+
+@router.get(
+    "/email-availability",
+    response_model=EmailAvailabilityResponse,
+    summary="Check registration email availability",
+)
+def email_availability(
+    email: Annotated[str, Query(min_length=3, max_length=320)],
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> EmailAvailabilityResponse:
+    """Return only the registration availability of an email address."""
+    try:
+        normalized_email = str(RegisterRequest.model_validate({
+            "username": "check",
+            "full_name": "check",
+            "email": email,
+            "password": "placeholder",
+        }).email)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid email address") from error
+    return EmailAvailabilityResponse(available=service.is_email_available(normalized_email))
 
 
 @router.post("/login", response_model=TokenResponse, summary="Log in with email and password")

@@ -140,7 +140,7 @@ class AuthRepository:
 
     def mark_google_email_verified(self, *, user_id: int, google_id: str) -> bool:
         """Record that the linked Google identity supplied a verified email."""
-        result = self._db.execute(
+        self._db.execute(
             text(
                 """
                 UPDATE users
@@ -150,7 +150,7 @@ class AuthRepository:
             ),
             {"user_id": user_id, "google_id": google_id},
         )
-        return result.rowcount == 1
+        return True
 
     def mark_email_verified(self, user_id: int) -> bool:
         """Set email_verified after a successful OTP verification."""

@@ -158,3 +158,9 @@ class ChallengeResponse(BaseModel):
 
     message: str
     challenge: str
+
+
+class EmailAvailabilityResponse(BaseModel):
+    """Whether an email address can be used for registration."""
+
+    available: bool

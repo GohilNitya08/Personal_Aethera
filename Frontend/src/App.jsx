@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authStore, API_BASE_URL } from './services/api';
 
 const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
-const formatBytes = (bytes = 0) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
+const formatBytes = (bytes = 0) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const formatDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : '—';
 
 function useAsync(task, dependencies = []) {
@@ -20,24 +20,38 @@ function AuthScreen({ onAuthenticated, oauthError }) {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ email: '', password: '', username: '', full_name: '', challenge: '', otp: '', reset_token: '', new_password: '' });
   const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+  const [emailStatus, setEmailStatus] = useState('');
+  useEffect(() => {
+    if (mode !== 'register') return undefined;
+    const email = form.email.trim();
+    setEmailStatus('');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
+    setEmailStatus('checking');
+    const timer = setTimeout(async () => {
+      try { setEmailStatus((await api.emailAvailability(email)).available ? 'available' : 'registered'); }
+      catch { setEmailStatus(''); }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [form.email, mode]);
   const submit = async (event) => {
     event.preventDefault(); setError(''); setLoading(true);
     try {
-      if (mode === 'register') { await api.register(form); setMode('login'); setError('Account created. Sign in to continue.'); }
-      else if (mode === 'forgot') { await api.forgotPassword({ email: form.email }); setMode('verify'); setError('If an account exists, a reset code was sent.'); }
+      if (mode === 'register') { const result = await api.register({ email: form.email, password: form.password, username: form.username, full_name: form.full_name }); setForm({ ...form, challenge: result.challenge, otp: '' }); setMode('email-verify'); setError(result.message); }
+      else if (mode === 'forgot') { const res = await api.forgotPassword({ email: form.email }); setForm({ ...form, challenge: res.challenge }); setMode('verify'); setError(res.message || 'If an account exists, a reset code was sent.'); }
       else if (mode === 'verify') { const result = await api.verifyResetOtp({ challenge: form.challenge, otp: form.otp }); setForm({ ...form, reset_token: result.reset_token }); setMode('reset'); setError('Code verified. Choose a new password.'); }
+      else if (mode === 'email-verify') { await api.verifyEmail({ challenge: form.challenge, otp: form.otp }); setMode('login'); setForm({ ...form, password: '' }); setError('Email verified. Sign in to continue.'); }
       else if (mode === 'reset') { await api.resetPassword({ reset_token: form.reset_token, new_password: form.new_password }); setMode('login'); setForm({ ...form, password: '', new_password: '' }); setError('Password reset. Sign in to continue.'); }
       else { const tokens = await api.login({ email: form.email, password: form.password }); authStore.set(tokens); onAuthenticated(); }
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
     const resetMode = ['forgot', 'verify', 'reset'].includes(mode);
-    return <main className="auth-shell"><section className="auth-intro"><div className="brand"><span>✦</span> AETHERA</div><div><p className="eyebrow">PRIVATE BY DESIGN</p><h1>Your work,<br />calmly organized.</h1><p>Secure, intelligent storage and collaboration for the things that matter.</p></div><div className="intro-card"><span>◈</span><p>One place for your documents, projects, and shared workspaces.</p></div></section><section className="auth-panel"><form onSubmit={submit} className="auth-card"><p className="eyebrow">WELCOME TO AETHERA</p><h2>{mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : mode === 'verify' ? 'Enter your code' : 'Choose a new password'}</h2><p className="muted">{mode === 'login' ? 'Continue to your secure workspace.' : 'Secure account recovery for AETHERA.'}</p>{(oauthError || error) && <div className="notice">{oauthError || error}</div>}
-      {['login', 'register', 'forgot'].includes(mode) && <Field label="Email address" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required />}
+    return <main className="auth-shell"><section className="auth-intro"><div className="brand"><span>✦</span> AETHERA</div><div><p className="eyebrow">PRIVATE BY DESIGN</p><h1>Your work,<br />calmly organized.</h1><p>Secure, intelligent storage and collaboration for the things that matter.</p></div><div className="intro-card"><span>◈</span><p>One place for your documents, projects, and shared workspaces.</p></div></section><section className="auth-panel"><form onSubmit={submit} className="auth-card"><p className="eyebrow">WELCOME TO AETHERA</p><h2>{mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : mode === 'verify' || mode === 'email-verify' ? 'Enter your code' : 'Choose a new password'}</h2><p className="muted">{mode === 'login' ? 'Continue to your secure workspace.' : mode === 'email-verify' ? 'Enter the code sent to your email address.' : 'Secure account recovery for AETHERA.'}</p>{(oauthError || error) && <div className="notice">{oauthError || error}</div>}
+      {['login', 'register', 'forgot'].includes(mode) && <>{<Field label="Email address" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required />}{mode === 'register' && emailStatus && <small className={`email-status ${emailStatus}`}>{emailStatus === 'checking' ? 'Checking...' : emailStatus === 'available' ? 'Email available' : 'Email already registered'}</small>}</>}
       {mode === 'register' && <><Field label="Full name" value={form.full_name} onChange={(full_name) => setForm({ ...form, full_name })} required /><Field label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} required /><Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required minLength={8} /></>}
       {mode === 'login' && <Field label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} required minLength={1} />}
-      {mode === 'verify' && <><Field label="Reset challenge" value={form.challenge} onChange={(challenge) => setForm({ ...form, challenge })} required /><Field label="6-digit code" inputMode="numeric" value={form.otp} onChange={(otp) => setForm({ ...form, otp })} required /></>}
+      {(mode === 'verify' || mode === 'email-verify') && <Field label="6-digit code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={form.otp} onChange={(otp) => setForm({ ...form, otp })} required />}
       {mode === 'reset' && <Field label="New password" type="password" value={form.new_password} onChange={(new_password) => setForm({ ...form, new_password })} required minLength={8} />}
-      <button className="button primary" disabled={loading}>{loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset code' : mode === 'verify' ? 'Verify code' : 'Reset password'}</button>
+      <button className="button primary" disabled={loading || (mode === 'register' && emailStatus !== 'available')}>{loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : mode === 'register' ? 'Create account' : mode === 'forgot' ? 'Send reset code' : mode === 'verify' || mode === 'email-verify' ? 'Verify code' : 'Reset password'}</button>
       {mode === 'login' && <><div className="divider"><span>or</span></div><a className="button google" href={`${API_BASE_URL}/auth/google/login`}><b>G</b> Continue with Google</a><p className="switch"><button type="button" onClick={() => { setMode('forgot'); setError(''); }}>Forgot password?</button></p></>}
       <p className="switch"><button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? 'Create an account' : 'Back to sign in'}</button></p></form></section></main>;
 }

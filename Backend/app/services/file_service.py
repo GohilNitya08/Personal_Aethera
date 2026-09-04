@@ -343,7 +343,9 @@ class FileService:
         return role
 
     def _require_file_manager(self, file: FileRecord, folder: Folder, actor_id: int) -> None:
-        self._require_writer(folder, actor_id)
+        role = self._require_writer(folder, actor_id)
+        if role == "EDITOR" and file.uploaded_by != actor_id:
+            raise FilePermissionError
 
     def _require_file_deleter(self, file: FileRecord, folder: Folder, actor_id: int) -> None:
         role = self._workspace_role(folder, actor_id)

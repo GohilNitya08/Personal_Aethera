@@ -428,7 +428,8 @@ def test_owner_admin_editor_write_permissions() -> None:
     file_service = FileService(DummyFileRepo({30: file}), folder_service, workspace_service)
 
     assert file_service.update_file(30, 11, FileUpdateRequest(file_name="admin.txt")).file_name == "admin.txt"
-    assert file_service.update_file(30, 12, FileUpdateRequest(file_name="editor.txt")).file_name == "editor.txt"
+    with pytest.raises(FilePermissionError):
+        file_service.update_file(30, 12, FileUpdateRequest(file_name="editor.txt"))
     assert file_service.get_file(30, 13).file_id == 30
 
     with pytest.raises(FilePermissionError):

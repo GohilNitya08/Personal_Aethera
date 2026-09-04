@@ -105,7 +105,7 @@ class FakeEmailService:
         self.sent: list[tuple[str, str, str]] = []
         self.fail = fail
 
-    def send_password_reset_otp(self, recipient: str, otp: str) -> None:
+    def send_password_reset_otp(self, recipient: str, otp: str, full_name: str) -> None:
         if self.fail:
             raise EmailNotConfiguredError("SMTP not configured")
         self.sent.append(("password_reset", recipient, otp))

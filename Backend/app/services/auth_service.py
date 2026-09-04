@@ -160,6 +160,10 @@ class AuthService:
             raise RuntimeError("Created user could not be loaded")
         return user
 
+    def is_email_available(self, email: str) -> bool:
+        """Return only whether an email address is already registered."""
+        return self._repository.get_by_email(email.lower()) is None
+
     def login(self, *, email: str, password: str) -> AuthTokens:
         """Verify credentials, update login metadata, and issue both JWTs."""
         user = self._repository.get_by_email(email.lower())
@@ -303,7 +307,7 @@ class AuthService:
         if user is not None and user.account_status == "ACTIVE":
             challenge, otp = self._otp_service.issue(user.user_id, purpose="password_reset")
             try:
-                self._email_service.send_password_reset_otp(user.email, otp)
+                self._email_service.send_password_reset_otp(user.email, otp, user.full_name)
             except (EmailNotConfiguredError, EmailDeliveryError):
                 self._otp_service.consume(challenge)
                 raise

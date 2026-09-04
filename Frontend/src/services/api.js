@@ -34,6 +34,8 @@ export const api = {
   resetPassword: (payload) => request('/auth/reset-password', json('POST', payload)),
   exchangeGoogleOAuthCode: (code) => request('/auth/google/exchange', json('POST', { code })),
   register: (payload) => request('/auth/register', json('POST', payload)),
+  emailAvailability: (email) => request(`/auth/email-availability?email=${encodeURIComponent(email)}`),
+  verifyEmail: (payload) => request('/auth/verify-email', json('POST', payload)),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/users/me'),
   updateMe: (payload) => request('/users/me', json('PUT', payload)),
