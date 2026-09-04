@@ -11,6 +11,23 @@ export const authStore = {
   clear() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(REFRESH_TOKEN_KEY); },
 };
 
+function formatErrorDetail(detail, status) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') return item.msg || item.message || '';
+      return '';
+    }).filter(Boolean);
+    if (parts.length) return parts.join(', ');
+  }
+  if (detail && typeof detail === 'object') {
+    if (typeof detail.msg === 'string') return detail.msg;
+    if (typeof detail.message === 'string') return detail.message;
+  }
+  return `Request failed (${status})`;
+}
+
 async function request(path, options = {}) {
   const headers = { ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...options.headers };
   if (authStore.token) headers.Authorization = `Bearer ${authStore.token}`;
@@ -21,7 +38,7 @@ async function request(path, options = {}) {
   }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(data?.detail || `Request failed (${response.status})`);
+  if (!response.ok) throw new Error(formatErrorDetail(data?.detail, response.status));
   return data;
 }
 
@@ -52,9 +69,12 @@ export const api = {
   folders: (workspaceId) => request(`/workspaces/${workspaceId}/folders`),
   folderTree: (workspaceId) => request(`/workspaces/${workspaceId}/tree`),
   createFolder: (payload) => request('/folders', json('POST', payload)),
-  files: (folderId) => request(`/folders/${folderId}/files`),
+  files: (folderId, { includeDeleted = false } = {}) => request(`/folders/${folderId}/files${includeDeleted ? '?include_deleted=true' : ''}`),
   uploadFile: (folderId, file) => { const body = new FormData(); body.append('upload', file); return request(`/folders/${folderId}/files/upload`, { method: 'POST', body }); },
   file: (id) => request(`/files/${id}`),
+  downloadFile: (id) => request(`/files/${id}/download`),
+  deleteFile: (id) => request(`/files/${id}`, { method: 'DELETE' }),
+  restoreFile: (id) => request(`/files/${id}/restore`, { method: 'POST' }),
   shares: () => request('/shares'),
   createShare: (payload) => request('/shares', json('POST', payload)),
   updateShare: (id, payload) => request(`/shares/${id}`, json('PUT', payload)),

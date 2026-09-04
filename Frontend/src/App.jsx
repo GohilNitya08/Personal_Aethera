@@ -450,11 +450,188 @@ function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, o
   );
 }
 
- function FolderBrowser({ folderId, workspace, back, go }) { const { data: folder, loading: folderLoading, error: folderError } = useAsync(() => api.folders(workspace.workspace_id).then((all) => all.find((item) => item.folder_id === folderId)), [folderId, workspace.workspace_id]); const filesState = useAsync(() => api.files(folderId), [folderId]); const [selected, setSelected] = useState(null); const [uploading, setUploading] = useState(false);
-  const upload = async (event) => { const file = event.target.files?.[0]; if (!file) return; setUploading(true); try { await api.uploadFile(folderId, file); filesState.reload(); } catch (error) { alert(error.message); } finally { setUploading(false); event.target.value = ''; } };
-  useEffect(() => { const button = document.querySelector('.browser-title .button.secondary'); if (!button) return undefined; const input = document.createElement('input'); input.type = 'file'; input.hidden = true; input.onchange = upload; const openPicker = (event) => { event.stopPropagation(); input.click(); }; button.textContent = uploading ? 'Uploading…' : 'Upload file'; button.addEventListener('click', openPicker, true); button.appendChild(input); return () => { button.removeEventListener('click', openPicker, true); input.remove(); }; }, [upload, uploading]);
-  if (folderError) return <ErrorState message={folderError} />; if (folderLoading) return <Loading />;
-  return <div className="page-content"><button className="back" onClick={back}>← {workspace.workspace_name}</button><section className="browser-title"><div><p className="eyebrow">FOLDER</p><h1>▰ {folder?.folder_name || 'Folder'}</h1><p>{folder?.description || 'Files stored in this folder.'}</p></div><button className="button secondary" onClick={() => alert('The current backend exposes file metadata APIs only; it does not provide a binary file-upload endpoint.')}>Upload unavailable</button></section><section className="panel"><div className="panel-head"><div><h3>Files</h3><p>File records returned by the AETHERA API.</p></div></div>{filesState.error ? <ErrorState message={filesState.error} retry={filesState.reload} /> : filesState.loading ? <Loading /> : filesState.data.length ? <div className="file-table"><div className="table-head"><span>Name</span><span>Type</span><span>Size</span><span>Updated</span><span></span></div>{filesState.data.map((file) => <div className="file-row" key={file.file_id}><span><b>▧</b> {file.file_name}</span><span>{file.mime_type || file.file_extension || '—'}</span><span>{formatBytes(file.file_size)}</span><span>{formatDate(file.updated_at)}</span><button className="text-button" onClick={() => setSelected(file)}>Share</button></div>)}</div> : <Empty title="No files in this folder" body="No file records have been created in the backend for this folder." />}</section>{selected && <ShareDialog file={selected} close={() => setSelected(null)} onCreated={() => go('shared')} />}</div>; }
+function FolderBrowser({ folderId, workspace, back, go }) {
+  const { data: folder, loading: folderLoading, error: folderError } = useAsync(
+    () => api.folders(workspace.workspace_id).then((all) => all.find((item) => item.folder_id === folderId)),
+    [folderId, workspace.workspace_id],
+  );
+  const [showTrash, setShowTrash] = useState(false);
+  const filesState = useAsync(() => api.files(folderId, { includeDeleted: showTrash }), [folderId, showTrash]);
+  const [selected, setSelected] = useState(null);
+  const [details, setDetails] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [notice, setNotice] = useState({ text: '', tone: '' });
+  const fileInputRef = useRef(null);
+
+  const visibleFiles = (filesState.data || []).filter((file) => (showTrash ? file.is_deleted : !file.is_deleted));
+
+  const upload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setNotice({ text: '', tone: '' });
+    try {
+      await api.uploadFile(folderId, file);
+      setNotice({ text: `"${file.name}" uploaded successfully.`, tone: 'success' });
+      await filesState.reload();
+    } catch (error) {
+      setNotice({ text: error.message || 'Upload failed.', tone: '' });
+    } finally {
+      setUploading(false);
+      event.target.value = '';
+    }
+  };
+
+  const download = async (file) => {
+    setBusyId(file.file_id);
+    setNotice({ text: '', tone: '' });
+    try {
+      const result = await api.downloadFile(file.file_id);
+      if (!result?.download_url) throw new Error('Download link was not available.');
+      window.open(result.download_url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      setNotice({ text: error.message || 'Download failed.', tone: '' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setBusyId(pendingDelete.file_id);
+    try {
+      await api.deleteFile(pendingDelete.file_id);
+      setNotice({ text: `"${pendingDelete.file_name}" moved to trash.`, tone: 'success' });
+      setPendingDelete(null);
+      await filesState.reload();
+    } catch (error) {
+      setNotice({ text: error.message || 'Could not delete file.', tone: '' });
+      setPendingDelete(null);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const restore = async (file) => {
+    setBusyId(file.file_id);
+    setNotice({ text: '', tone: '' });
+    try {
+      await api.restoreFile(file.file_id);
+      setNotice({ text: `"${file.file_name}" restored.`, tone: 'success' });
+      await filesState.reload();
+    } catch (error) {
+      setNotice({ text: error.message || 'Could not restore file.', tone: '' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const goBack = () => {
+    if (folder?.parent_folder_id) go('folder', folder.parent_folder_id, workspace);
+    else back();
+  };
+
+  if (folderError) return <ErrorState message={folderError} />;
+  if (folderLoading) return <Loading />;
+
+  return (
+    <div className="page-content">
+      <button className="back" onClick={goBack}>← {folder?.parent_folder_id ? 'Parent folder' : workspace.workspace_name}</button>
+      <section className="browser-title">
+        <div>
+          <p className="eyebrow">FOLDER</p>
+          <h1>▰ {folder?.folder_name || 'Folder'}</h1>
+          <p>{folder?.description || 'Files stored in this folder.'}</p>
+        </div>
+        <div className="page-actions">
+          <button type="button" className="button secondary" onClick={() => { setShowTrash(false); setNotice({ text: '', tone: '' }); }} disabled={!showTrash}>Files</button>
+          <button type="button" className="button secondary" onClick={() => { setShowTrash(true); setNotice({ text: '', tone: '' }); }} disabled={showTrash}>Trash</button>
+          {!showTrash && (
+            <>
+              <input ref={fileInputRef} type="file" hidden onChange={upload} />
+              <button type="button" className="button secondary" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                {uploading ? 'Uploading…' : 'Upload file'}
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+      {notice.text && <div className={`notice${notice.tone === 'success' ? ' success' : ''}`}>{notice.text}</div>}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3>{showTrash ? 'Trash' : 'Files'}</h3>
+            <p>{showTrash ? 'Soft-deleted files in this folder.' : 'Files in the currently selected folder.'}</p>
+          </div>
+        </div>
+        {filesState.error ? <ErrorState message={filesState.error} retry={filesState.reload} /> : filesState.loading ? <Loading /> : visibleFiles.length ? (
+          <div className="file-table">
+            <div className="table-head"><span>Name</span><span>Type</span><span>Size</span><span>Updated</span><span></span></div>
+            {visibleFiles.map((file) => (
+              <div className="file-row" key={file.file_id}>
+                <span><b>▧</b> {file.file_name}{file.is_deleted ? <small className="muted"> · deleted</small> : null}</span>
+                <span>{file.mime_type || file.file_extension || '—'}</span>
+                <span>{formatBytes(file.file_size)}</span>
+                <span>{formatDate(file.updated_at)}</span>
+                <div className="member-actions">
+                  <button type="button" className="text-button" onClick={() => setDetails(file)}>Details</button>
+                  {!file.is_deleted && (
+                    <>
+                      <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => download(file)}>
+                        {busyId === file.file_id ? 'Opening…' : 'Download'}
+                      </button>
+                      <button type="button" className="text-button" onClick={() => setSelected(file)}>Share</button>
+                      <button type="button" className="text-button danger" disabled={busyId === file.file_id} onClick={() => setPendingDelete(file)}>Delete</button>
+                    </>
+                  )}
+                  {file.is_deleted && (
+                    <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => restore(file)}>
+                      {busyId === file.file_id ? 'Restoring…' : 'Restore'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title={showTrash ? 'Trash is empty' : 'No files in this folder'}
+            body={showTrash ? 'Deleted files will appear here until they are restored.' : 'Upload a file to store it in this folder.'}
+          />
+        )}
+      </section>
+      {selected && <ShareDialog file={selected} close={() => setSelected(null)} onCreated={() => go('shared')} />}
+      {details && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <button type="button" className="modal-close" onClick={() => setDetails(null)}>×</button>
+            <p className="eyebrow">FILE DETAILS</p>
+            <h3>{details.file_name}</h3>
+            <p className="muted">Original name: {details.original_file_name}</p>
+            <p className="muted">Type: {details.mime_type || details.file_extension || '—'}</p>
+            <p className="muted">Size: {formatBytes(details.file_size)}</p>
+            <p className="muted">Created: {formatDate(details.created_at)}</p>
+            <p className="muted">Updated: {formatDate(details.updated_at)}</p>
+            <p className="muted">Status: {details.is_deleted ? 'In trash' : details.is_archived ? 'Archived' : 'Active'}{details.is_favorite ? ' · Favorite' : ''}</p>
+            <button type="button" className="button secondary file-details-close" onClick={() => setDetails(null)}>Close</button>
+          </div>
+        </div>
+      )}
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete ${pendingDelete.file_name}?`}
+          body="This moves the file to trash. You can restore it later from the Trash view."
+          confirmLabel="Delete"
+          busy={busyId === pendingDelete.file_id}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </div>
+  );
+}
 
 function ShareDialog({ file, close, onCreated }) { const [form, setForm] = useState({ share_type: 'LINK', permission: 'VIEW', shared_with: '', expires_at: '' }); const [error, setError] = useState(''); const submit = async (e) => { e.preventDefault(); try { const payload = { file_id: file.file_id, share_type: form.share_type, permission: form.permission }; if (form.share_type === 'PRIVATE' && form.shared_with) payload.shared_with = Number(form.shared_with); if (form.expires_at) payload.expires_at = new Date(form.expires_at).toISOString(); await api.createShare(payload); onCreated(); } catch (err) { setError(err.message); } };
   return <div className="modal-backdrop"><form className="modal" onSubmit={submit}><button type="button" className="modal-close" onClick={close}>×</button><p className="eyebrow">SHARE FILE</p><h3>{file.file_name}</h3><label className="field"><span>Share type</span><select value={form.share_type} onChange={(e) => setForm({ ...form, share_type: e.target.value })}><option value="LINK">Link</option><option value="PUBLIC">Public</option><option value="PRIVATE">Private</option></select></label>{form.share_type === 'PRIVATE' && <Field label="Recipient user ID" type="number" value={form.shared_with} onChange={(shared_with) => setForm({ ...form, shared_with })} required />}<label className="field"><span>Permission</span><select value={form.permission} onChange={(e) => setForm({ ...form, permission: e.target.value })}><option value="VIEW">View</option><option value="EDIT">Edit</option></select></label><label className="field"><span>Expiration</span><select value={form.expires_at ? 'date' : 'never'} onChange={(e) => setForm({ ...form, expires_at: e.target.value === 'never' ? '' : form.expires_at || new Date(Date.now() + 86400000).toISOString().slice(0, 16) })}><option value="never">Never</option><option value="date">Expiration date/time</option></select></label>{form.expires_at && <Field label="Expires at" type="datetime-local" value={form.expires_at} onChange={(expires_at) => setForm({ ...form, expires_at })} required />}{error && <div className="notice">{error}</div>}<button className="button primary">Create share</button></form></div>; }
