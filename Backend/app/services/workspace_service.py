@@ -135,7 +135,9 @@ class WorkspaceService:
 
     def get_members(self, workspace_id: int, actor_id: int) -> list[WorkspaceMember]:
         """List members of a workspace available to the caller."""
-        self._require_access(workspace_id, actor_id)
+        _, role = self._require_access(workspace_id, actor_id)
+        if role is None:
+            raise WorkspacePermissionError
         return self._repository.list_members(workspace_id)
 
     def invite_member(
@@ -274,7 +276,9 @@ class WorkspaceService:
         self, workspace_id: int, actor_id: int, *, limit: int
     ) -> list[WorkspaceActivity]:
         """Return module-recorded activity to an authorized workspace member."""
-        self._require_access(workspace_id, actor_id)
+        _, role = self._require_access(workspace_id, actor_id)
+        if role is None:
+            raise WorkspacePermissionError
         return self._repository.list_activity(workspace_id, limit=limit)
 
     def set_archived(self, workspace_id: int, actor_id: int, *, is_archived: bool) -> Workspace:
@@ -330,13 +334,24 @@ class WorkspaceService:
             raise
         return self.get_workspace(workspace_id, new_owner_id)
 
-    def _require_access(self, workspace_id: int, user_id: int) -> tuple[Workspace, str]:
+    def search_workspaces(self, query: str, user_id: int) -> list[Workspace]:
+        """Search across public and user-accessible workspaces."""
+        if not query or len(query.strip()) == 0:
+            return []
+        return self._repository.search_workspaces(query.strip(), user_id)
+
+    def _require_access(self, workspace_id: int, user_id: int) -> tuple[Workspace, str | None]:
         workspace = self._repository.get_by_id(workspace_id)
         if workspace is None:
             raise WorkspaceNotFoundError
-        return workspace, self._membership_role(workspace, user_id)
+        try:
+            return workspace, self._membership_role(workspace, user_id)
+        except WorkspacePermissionError:
+            if workspace.visibility == "PUBLIC":
+                return workspace, None
+            raise
 
-    def _require_manager(self, workspace_id: int, user_id: int) -> tuple[Workspace, str]:
+    def _require_manager(self, workspace_id: int, user_id: int) -> tuple[Workspace, str | None]:
         workspace, role = self._require_access(workspace_id, user_id)
         if role not in {"OWNER", "ADMIN"}:
             raise WorkspacePermissionError
@@ -357,7 +372,7 @@ class WorkspaceService:
         raise WorkspacePermissionError
 
     @staticmethod
-    def _with_role(workspace: Workspace, role: str) -> Workspace:
+    def _with_role(workspace: Workspace, role: str | None) -> Workspace:
         return Workspace(
             workspace_id=workspace.workspace_id,
             user_id=workspace.user_id,

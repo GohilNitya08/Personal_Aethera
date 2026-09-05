@@ -52,7 +52,7 @@ CREATE TABLE workspaces (
 
     workspace_type ENUM('PERSONAL', 'INSTITUTION') NOT NULL,
 
-    visibility ENUM('PRIVATE', 'SHARED') DEFAULT 'PRIVATE',
+    visibility ENUM('PRIVATE', 'SHARED', 'PUBLIC') DEFAULT 'PRIVATE',
 
     storage_used BIGINT DEFAULT 0,
 
@@ -376,4 +376,16 @@ CREATE TABLE file_tags (
 
     UNIQUE (file_id, tag_id)
 
+);
+
+CREATE TABLE workspace_join_requests (
+    request_id VARCHAR(36) PRIMARY KEY,
+    workspace_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    UNIQUE (workspace_id, user_id)
 );

@@ -159,10 +159,25 @@ class FileService:
         self, folder_id: int, actor_id: int, *, include_deleted: bool
     ) -> list[FileRecord]:
         """List a readable folder's files with caller-specific favorite status."""
-        self._get_active_folder(folder_id, actor_id)
+        folder = self._get_active_folder(folder_id, actor_id)
+        if include_deleted and self._is_public_workspace_viewer(folder, actor_id):
+            raise FilePermissionError
         return self._repository.list_by_folder(
             folder_id, user_id=actor_id, include_deleted=include_deleted
         )
+
+    def is_public_viewer_for_folder(self, folder_id: int, actor_id: int) -> bool:
+        """Return whether a readable folder is being viewed without membership."""
+        return self._is_public_workspace_viewer(
+            self._get_active_folder(folder_id, actor_id), actor_id
+        )
+
+    def is_public_viewer_for_file(self, file_id: int, actor_id: int) -> bool:
+        """Return whether a readable file is being viewed without membership."""
+        _, folder = self._get_file_and_folder(
+            file_id, actor_id, include_deleted=False
+        )
+        return self._is_public_workspace_viewer(folder, actor_id)
 
     def get_file(self, file_id: int, actor_id: int) -> FileRecord:
         """Return a non-deleted file after validating workspace membership."""
@@ -281,7 +296,8 @@ class FileService:
 
     def favorite_file(self, file_id: int, actor_id: int) -> FileRecord:
         """Mark a readable file as favorite for the current user only."""
-        self._get_file_and_folder(file_id, actor_id, include_deleted=False)
+        _, folder = self._get_file_and_folder(file_id, actor_id, include_deleted=False)
+        self._workspace_role(folder, actor_id)
         try:
             self._repository.add_favorite(file_id, actor_id)
             self._repository.record_activity(
@@ -301,7 +317,8 @@ class FileService:
 
     def unfavorite_file(self, file_id: int, actor_id: int) -> FileRecord:
         """Remove the current user's favorite entry from a readable file."""
-        self._get_file_and_folder(file_id, actor_id, include_deleted=False)
+        _, folder = self._get_file_and_folder(file_id, actor_id, include_deleted=False)
+        self._workspace_role(folder, actor_id)
         try:
             if not self._repository.remove_favorite(file_id, actor_id):
                 raise FileConflictError("File is not favorited")
@@ -362,6 +379,15 @@ class FileService:
         if workspace.member_role is None:
             raise FilePermissionError
         return workspace.member_role
+
+    def _is_public_workspace_viewer(self, folder: Folder, actor_id: int) -> bool:
+        try:
+            workspace = self._workspace_service.get_workspace(folder.workspace_id, actor_id)
+        except WorkspaceNotFoundError as error:
+            raise FileNotFoundError("Workspace not found") from error
+        except WorkspacePermissionError as error:
+            raise FilePermissionError from error
+        return workspace.member_role is None
 
     @staticmethod
     def _object_key(workspace_id: int, folder_id: int) -> str:

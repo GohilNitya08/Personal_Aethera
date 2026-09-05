@@ -138,9 +138,12 @@ def list_files(
         files = service.list_files(
             folder_id, current_user.user_id, include_deleted=include_deleted
         )
+        is_public_viewer = service.is_public_viewer_for_folder(
+            folder_id, current_user.user_id
+        )
     except (FileNotFoundError, FilePermissionError) as error:
         raise _file_http_exception(error) from error
-    return [_file_response(file) for file in files]
+    return [_file_response(file, expose_storage_path=not is_public_viewer) for file in files]
 
 
 @router.get("/files/{file_id}", response_model=FileResponse, summary="Get a file")
@@ -152,9 +155,12 @@ def get_file(
     """Return non-deleted file metadata to an authorized workspace member."""
     try:
         file = service.get_file(file_id, current_user.user_id)
+        is_public_viewer = service.is_public_viewer_for_file(
+            file_id, current_user.user_id
+        )
     except (FileNotFoundError, FilePermissionError) as error:
         raise _file_http_exception(error) from error
-    return _file_response(file)
+    return _file_response(file, expose_storage_path=not is_public_viewer)
 
 
 @router.put("/files/{file_id}", response_model=FileResponse, summary="Update file metadata")
@@ -222,9 +228,12 @@ def list_versions(
     """List version metadata for a readable non-deleted file."""
     try:
         versions = service.list_versions(file_id, current_user.user_id)
+        is_public_viewer = service.is_public_viewer_for_file(
+            file_id, current_user.user_id
+        )
     except (FileNotFoundError, FilePermissionError) as error:
         raise _file_http_exception(error) from error
-    return [_version_response(version) for version in versions]
+    return [_version_response(version, expose_storage_path=not is_public_viewer) for version in versions]
 
 
 @router.post(
@@ -291,7 +300,7 @@ def _file_http_exception(error: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error) or "File state conflict")
 
 
-def _file_response(file: FileRecord) -> FileResponse:
+def _file_response(file: FileRecord, *, expose_storage_path: bool = True) -> FileResponse:
     return FileResponse(
         file_id=file.file_id,
         folder_id=file.folder_id,
@@ -301,7 +310,7 @@ def _file_response(file: FileRecord) -> FileResponse:
         file_extension=file.file_extension,
         mime_type=file.mime_type,
         file_size=file.file_size,
-        storage_path=file.storage_path,
+        storage_path=file.storage_path if expose_storage_path else None,
         file_hash=file.file_hash,
         ai_enabled=file.ai_enabled,
         is_archived=file.is_archived,
@@ -312,12 +321,12 @@ def _file_response(file: FileRecord) -> FileResponse:
     )
 
 
-def _version_response(version: FileVersion) -> FileVersionResponse:
+def _version_response(version: FileVersion, *, expose_storage_path: bool = True) -> FileVersionResponse:
     return FileVersionResponse(
         version_id=version.version_id,
         file_id=version.file_id,
         version_number=version.version_number,
-        storage_path=version.storage_path,
+        storage_path=version.storage_path if expose_storage_path else None,
         file_size=version.file_size,
         file_hash=version.file_hash,
         uploaded_by=version.uploaded_by,

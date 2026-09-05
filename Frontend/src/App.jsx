@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authStore, API_BASE_URL } from './services/api';
 
-const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
+const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['search', 'Search workspaces'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
 const formatBytes = (bytes = 0) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const formatDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : '—';
 
@@ -114,7 +114,7 @@ function Field({ label, onChange, ...props }) { return <label className="field">
 function Empty({ title, body, action }) { return <div className="empty"><div>◇</div><h3>{title}</h3><p>{body}</p>{action}</div>; }
 function ErrorState({ message, retry }) { return <div className="notice"><b>Couldn’t load this view.</b><br />{message} {retry && <button onClick={retry}>Try again</button>}</div>; }
 
-function AppShell({ page, setPage, onLogout, children, user }) { return <div className="app-shell"><aside><div className="brand"><span>✦</span> AETHERA</div><p className="workspace-label">WORKSPACE</p><nav>{navItems.map(([id, label]) => <button className={page === id ? 'active' : ''} onClick={() => setPage(id)} key={id}><span>{id === 'dashboard' ? '⌂' : id === 'workspaces' ? '▦' : id === 'shared' ? '↗' : '◎'}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><div>{user?.full_name?.slice(0, 1) || 'A'}</div><span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span></div><button className="logout" onClick={onLogout}>↪ Log out</button></div></aside><section className="main-area"><header><div><p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p><h2>{page === 'workspace' ? 'Workspace' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2></div><div className="top-status"><span></span> Secure session</div></header>{children}</section></div>; }
+function AppShell({ page, setPage, onLogout, children, user }) { return <div className="app-shell"><aside><div className="brand"><span>✦</span> AETHERA</div><p className="workspace-label">WORKSPACE</p><nav>{navItems.map(([id, label]) => <button className={page === id ? 'active' : ''} onClick={() => setPage(id)} key={id}><span>{id === 'dashboard' ? '⌂' : id === 'workspaces' ? '▦' : id === 'search' ? '⚲' : id === 'shared' ? '↗' : '◎'}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><div>{user?.full_name?.slice(0, 1) || 'A'}</div><span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span></div><button className="logout" onClick={onLogout}>↪ Log out</button></div></aside><section className="main-area"><header><div><p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p><h2>{page === 'workspace' ? 'Workspace' : page === 'search' ? 'Search workspaces' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2></div><div className="top-status"><span></span> Secure session</div></header>{children}</section></div>; }
 
 function Dashboard({ go }) { const { data: workspaces, loading, error, reload } = useAsync(api.workspaces, []); const { data: shares } = useAsync(api.shares, []);
   if (error) return <ErrorState message={error} retry={reload} />;
@@ -125,12 +125,12 @@ function WorkspaceCard({ workspace, open }) { return <button className="workspac
 
 function Workspaces({ open }) { const { data, loading, error, reload } = useAsync(api.workspaces, []); const [showForm, setShowForm] = useState(false); const [form, setForm] = useState({ workspace_name: '', workspace_type: 'PERSONAL', description: '', visibility: 'PRIVATE', color: 'blue' }); const [message, setMessage] = useState('');
   const create = async (e) => { e.preventDefault(); setMessage(''); try { const workspace = await api.createWorkspace(form); setShowForm(false); open('workspace', workspace.workspace_id); } catch (err) { setMessage(err.message); } };
-  return <div className="page-content"><div className="page-actions"><p className="muted">Create spaces for projects, teams, and private work.</p><button className="button primary" onClick={() => setShowForm(!showForm)}>+ New workspace</button></div>{showForm && <form className="inline-form" onSubmit={create}><Field label="Workspace name" value={form.workspace_name} onChange={(workspace_name) => setForm({ ...form, workspace_name })} required /><label className="field"><span>Type</span><select value={form.workspace_type} onChange={(e) => setForm({ ...form, workspace_type: e.target.value })}><option value="PERSONAL">Personal</option><option value="INSTITUTION">Institution</option></select></label><Field label="Description (optional)" value={form.description} onChange={(description) => setForm({ ...form, description })} /><label className="field"><span>Visibility</span><select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="PRIVATE">Private</option><option value="SHARED">Shared</option></select></label>{message && <div className="notice">{message}</div>}<button className="button primary">Create workspace</button></form>}{error ? <ErrorState message={error} retry={reload} /> : loading ? <Loading /> : data.length ? <div className="workspace-list">{data.map((workspace) => <WorkspaceCard key={workspace.workspace_id} workspace={workspace} open={() => open('workspace', workspace.workspace_id)} />)}</div> : <Empty title="No workspaces yet" body="Your workspace list is empty in the backend." />}</div>; }
+  return <div className="page-content"><div className="page-actions"><p className="muted">Create spaces for projects, teams, and private work.</p><button className="button primary" onClick={() => setShowForm(!showForm)}>+ New workspace</button></div>{showForm && <form className="inline-form" onSubmit={create}><Field label="Workspace name" value={form.workspace_name} onChange={(workspace_name) => setForm({ ...form, workspace_name })} required /><label className="field"><span>Type</span><select value={form.workspace_type} onChange={(e) => setForm({ ...form, workspace_type: e.target.value })}><option value="PERSONAL">Personal</option><option value="INSTITUTION">Institution</option></select></label><Field label="Description (optional)" value={form.description} onChange={(description) => setForm({ ...form, description })} /><label className="field"><span>Visibility</span><select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}><option value="PRIVATE">Private</option><option value="SHARED">Shared</option><option value="PUBLIC">Public</option></select></label>{message && <div className="notice">{message}</div>}<button className="button primary">Create workspace</button></form>}{error ? <ErrorState message={error} retry={reload} /> : loading ? <Loading /> : data.length ? <div className="workspace-list">{data.map((workspace) => <WorkspaceCard key={workspace.workspace_id} workspace={workspace} open={() => open('workspace', workspace.workspace_id)} />)}</div> : <Empty title="No workspaces yet" body="Your workspace list is empty in the backend." />}</div>; }
 
 function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
   const { data: workspace, loading, error, reload } = useAsync(() => api.workspace(workspaceId), [workspaceId]);
   const foldersState = useAsync(() => api.folders(workspaceId), [workspaceId]);
-  const membersState = useAsync(() => api.workspaceMembers(workspaceId), [workspaceId]);
+  const membersState = useAsync(() => workspace?.member_role ? api.workspaceMembers(workspaceId) : Promise.resolve([]), [workspaceId, workspace?.member_role]);
   const [folderName, setFolderName] = useState('');
   const [notice, setNotice] = useState('');
   const createFolder = async (event) => {
@@ -145,6 +145,7 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
   };
   if (error) return <ErrorState message={error} retry={reload} />;
   if (loading) return <Loading />;
+  const canWrite = ['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role);
   return (
     <div className="page-content">
       <button className="back" onClick={back}>← All workspaces</button>
@@ -159,18 +160,47 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
       </section>
       <section className="panel">
         <div className="panel-head"><div><h3>Folders</h3><p>Open a folder to view its actual files.</p></div></div>
-        <form className="compact-form" onSubmit={createFolder}>
+        {canWrite && <form className="compact-form" onSubmit={createFolder}>
           <input placeholder="New folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} required />
           <button className="button secondary">Add folder</button>
-        </form>
+        </form>}
         {notice && <div className="notice">{notice}</div>}
         {foldersState.error ? <ErrorState message={foldersState.error} retry={foldersState.reload} /> : foldersState.loading ? <Loading /> : foldersState.data.length ? (
-          <div className="folder-grid">{foldersState.data.map((folder) => <button className="folder-card" key={folder.folder_id} onClick={() => go('folder', folder.folder_id, workspace)}><span>▰</span><b>{folder.folder_name}</b><small>{folder.description || 'Folder'}</small></button>)}</div>
+          <div className="folder-grid">{foldersState.data.map((folder) => <div className="folder-card" key={folder.folder_id} style={{position:'relative'}}>{canWrite && <><button className="text-button" style={{position:'absolute', top:5, right:5, color:'#bf4c43'}} onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete folder?')) { api.deleteFolder(folder.folder_id).then(() => foldersState.reload()).catch(err => alert(err.message)); } }}>×</button><button className="text-button" style={{position:'absolute', top:5, right:25}} onClick={(e) => { e.stopPropagation(); const nn = window.prompt('New folder name:', folder.folder_name); if (nn && nn !== folder.folder_name) { api.updateFolder(folder.folder_id, { folder_name: nn }).then(() => foldersState.reload()).catch(err => alert(err.message)); } }}>✎</button></>}<button className="folder-inner" style={{background:'transparent', border:0, textAlign:'left', padding:0, margin:0, display:'grid', gap:7}} onClick={() => go('folder', folder.folder_id, workspace)}><span>▰</span><b>{folder.folder_name}</b><small>{folder.description || 'Folder'}</small></button></div>)}</div>
         ) : <Empty title="This workspace is empty" body="Create a folder to begin organizing files." />}
       </section>
-      <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} />
+      {workspace.member_role && <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} />}
+      {workspace.member_role === 'OWNER' && <JoinRequestsPanel workspaceId={workspaceId} onMembersChanged={() => membersState.reload()} />}
+      <WorkspaceSettings workspace={workspace} reload={reload} goBack={back} />
     </div>
   );
+}
+
+function JoinRequestsPanel({ workspaceId, onMembersChanged }) {
+  const { data, loading, error, reload } = useAsync(() => api.getJoinRequests(workspaceId), [workspaceId]);
+  const [selected, setSelected] = useState(new Set());
+  const [busy, setBusy] = useState(false);
+
+  if (error) return <ErrorState message={error} retry={reload} />;
+  if (loading || !data?.length) return null;
+
+  const toggleAll = (e) => setSelected(e.target.checked ? new Set(data.map(req => req.request_id)) : new Set());
+  const toggleOne = (id) => { const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next); };
+
+  const approveBulk = async () => { setBusy(true); try { await api.bulkApproveJoinRequests(workspaceId, Array.from(selected)); setSelected(new Set()); await reload(); onMembersChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
+  const approve = async (id) => { setBusy(true); try { await api.approveJoinRequest(id); await reload(); onMembersChanged(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
+  const reject = async (id) => { setBusy(true); try { await api.rejectJoinRequest(id); await reload(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
+
+  return <section className="panel"><div className="panel-head"><div><h3>Join Requests</h3><p>Users waiting to access this workspace.</p></div>{selected.size > 0 && <button className="button primary" disabled={busy} onClick={approveBulk}>Approve Selected</button>}</div><div className="file-table"><div className="table-head" style={{ gridTemplateColumns: 'auto 1fr auto auto' }}><input type="checkbox" checked={selected.size === data.length} onChange={toggleAll} /><span>User ID</span><span>Status</span><span></span></div>{data.map(req => <div className="file-row" key={req.request_id} style={{ gridTemplateColumns: 'auto 1fr auto auto' }}><input type="checkbox" checked={selected.has(req.request_id)} onChange={() => toggleOne(req.request_id)} /><span>User #{req.user_id}</span><span>{req.status}</span><div className="member-actions"><button className="text-button" disabled={busy} onClick={() => approve(req.request_id)}>Approve</button><button className="text-button danger" disabled={busy} onClick={() => reject(req.request_id)}>Reject</button></div></div>)}</div></section>;
+}
+
+function WorkspaceSettings({ workspace, reload, goBack }) {
+  const [form, setForm] = useState({ workspace_name: workspace.workspace_name, visibility: workspace.visibility });
+  const [busy, setBusy] = useState(false); const [pendingDelete, setPendingDelete] = useState(false);
+  const save = async (e) => { e.preventDefault(); setBusy(true); try { await api.updateWorkspace(workspace.workspace_id, form); await reload(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
+  const confirmDelete = async () => { setBusy(true); try { await api.deleteWorkspace(workspace.workspace_id); goBack(); } catch (e) { alert(e.message); setBusy(false); } };
+  if (workspace.member_role !== 'OWNER' && workspace.member_role !== 'ADMIN') return null;
+  return <section className="panel"><div className="panel-head"><div><h3>Workspace Settings</h3></div></div><form className="inline-form" onSubmit={save}><Field label="Name" value={form.workspace_name} onChange={v => setForm({...form, workspace_name: v})} required /><label className="field"><span>Visibility</span><select value={form.visibility} onChange={e => setForm({...form, visibility: e.target.value})}><option value="PRIVATE">Private</option><option value="SHARED">Shared</option><option value="PUBLIC">Public</option></select></label><button className="button primary" disabled={busy}>Save Changes</button></form><div className="divider" /><div><button className="button danger text-button" onClick={() => setPendingDelete(true)}>Delete Workspace</button></div>{pendingDelete && <ConfirmDialog title="Delete Workspace?" body="This action is irreversible." confirmLabel="Delete" busy={busy} onCancel={() => setPendingDelete(false)} onConfirm={confirmDelete} />}</section>;
 }
 
 function memberDisplayName(profile, member, currentUser) {
@@ -466,6 +496,8 @@ function FolderBrowser({ folderId, workspace, back, go }) {
   const fileInputRef = useRef(null);
 
   const visibleFiles = (filesState.data || []).filter((file) => (showTrash ? file.is_deleted : !file.is_deleted));
+  const canWrite = ['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role);
+  const canManageFiles = ['OWNER', 'ADMIN'].includes(workspace.member_role);
 
   const upload = async (event) => {
     const file = event.target.files?.[0];
@@ -547,8 +579,8 @@ function FolderBrowser({ folderId, workspace, back, go }) {
         </div>
         <div className="page-actions">
           <button type="button" className="button secondary" onClick={() => { setShowTrash(false); setNotice({ text: '', tone: '' }); }} disabled={!showTrash}>Files</button>
-          <button type="button" className="button secondary" onClick={() => { setShowTrash(true); setNotice({ text: '', tone: '' }); }} disabled={showTrash}>Trash</button>
-          {!showTrash && (
+          {canManageFiles && <button type="button" className="button secondary" onClick={() => { setShowTrash(true); setNotice({ text: '', tone: '' }); }} disabled={showTrash}>Trash</button>}
+          {!showTrash && canWrite && (
             <>
               <input ref={fileInputRef} type="file" hidden onChange={upload} />
               <button type="button" className="button secondary" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
@@ -582,11 +614,11 @@ function FolderBrowser({ folderId, workspace, back, go }) {
                       <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => download(file)}>
                         {busyId === file.file_id ? 'Opening…' : 'Download'}
                       </button>
-                      <button type="button" className="text-button" onClick={() => setSelected(file)}>Share</button>
-                      <button type="button" className="text-button danger" disabled={busyId === file.file_id} onClick={() => setPendingDelete(file)}>Delete</button>
+                       {canManageFiles && <button type="button" className="text-button" onClick={() => setSelected(file)}>Share</button>}
+                       {canManageFiles && <button type="button" className="text-button danger" disabled={busyId === file.file_id} onClick={() => setPendingDelete(file)}>Delete</button>}
                     </>
                   )}
-                  {file.is_deleted && (
+                   {file.is_deleted && canManageFiles && (
                     <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => restore(file)}>
                       {busyId === file.file_id ? 'Restoring…' : 'Restore'}
                     </button>
@@ -643,9 +675,14 @@ function Profile({ onUserChange }) { const state = useAsync(api.me, []); const [
   if (state.error) return <ErrorState message={state.error} retry={state.reload} />; if (state.loading || !form) return <Loading />; const user = state.data;
   return <div className="page-content profile"><section className="profile-card"><div className="avatar">{user.full_name.slice(0, 1)}</div><div><h3>{user.full_name}</h3><p>@{user.username} · {user.account_type}</p><p className="muted">{user.email}</p></div><button className="button secondary" onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit profile'}</button></section>{message && <div className="notice success">{message}</div>}{editing && <form className="inline-form" onSubmit={save}><Field label="Full name" value={form.full_name} onChange={(full_name) => setForm({ ...form, full_name })} required /><Field label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} required /><Field label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required /><label className="field"><span>Bio</span><textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label><button className="button primary">Save changes</button></form>}<section className="stat-grid"><Stat label="Storage used" value={formatBytes(user.storage_used)} /><Stat label="Storage limit" value={user.storage_limit ? formatBytes(user.storage_limit) : 'Unlimited'} /><Stat label="Email" value={user.email_verified ? 'Verified' : 'Unverified'} /></section></div>; }
 
+function WorkspaceSearch({ go }) { const [query, setQuery] = useState(''); const [results, setResults] = useState([]); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState({ text: '', tone: '' });
+  const search = async (e) => { e.preventDefault(); if (!query.trim()) return; setLoading(true); setError(''); setNotice({ text: '', tone: '' }); try { setResults(await api.searchWorkspaces(query)); } catch (err) { setError(err.message); } finally { setLoading(false); } };
+  const requestJoin = async (id) => { setNotice({ text: '', tone: '' }); try { await api.requestJoinWorkspace(id); setNotice({ text: 'Join request sent successfully.', tone: 'success' }); } catch (err) { setNotice({ text: err.message, tone: '' }); } };
+  return <div className="page-content"><section className="panel"><div className="panel-head"><div><h3>Search workspaces</h3><p>Find workspaces by ID or name. Public workspaces open read-only; private workspaces require approval.</p></div></div><form className="compact-form" onSubmit={search}><input placeholder="Workspace ID or name..." value={query} onChange={(e) => setQuery(e.target.value)} required /><button className="button primary" disabled={loading}>{loading ? 'Searching...' : 'Search'}</button></form>{notice.text && <div className={`notice ${notice.tone === 'success' ? 'success' : ''}`}>{notice.text}</div>}{error && <ErrorState message={error} />}{!loading && !error && results.length > 0 && <div className="file-table"><div className="table-head"><span>Name</span><span>ID</span><span>Owner</span><span>Visibility</span><span></span></div>{results.map((ws) => <div className="file-row" key={ws.workspace_id}><span><b>▦</b> {ws.workspace_name}</span><span>#{ws.workspace_id}</span><span>User #{ws.user_id}</span><span><span className={`badge ${ws.visibility.toLowerCase()}`}>{ws.visibility}</span></span><div className="member-actions">{ws.member_role || ws.visibility === 'PUBLIC' ? <button type="button" className="text-button" onClick={() => go('workspace', ws.workspace_id)}>Open</button> : <button type="button" className="text-button" onClick={() => requestJoin(ws.workspace_id)}>Request to Join</button>}</div></div>)}</div>}{!loading && !error && results.length === 0 && query && <Empty title="No results" body="Try a different search term." />}</section></div>; }
+
 export default function App() { const [authenticated, setAuthenticated] = useState(Boolean(authStore.token)); const [page, setPage] = useState('dashboard'); const [params, setParams] = useState({}); const [user, setUser] = useState(null); const [oauthError, setOauthError] = useState(''); const googleHandoffStarted = useRef(false); const me = useAsync(() => authenticated ? api.me() : Promise.resolve(null), [authenticated]); useEffect(() => { if (me.data) setUser(me.data); }, [me.data]); useEffect(() => { const handler = () => setAuthenticated(false); window.addEventListener('aethera:unauthorized', handler); return () => window.removeEventListener('aethera:unauthorized', handler); }, []); useEffect(() => { const handoffCode = new URLSearchParams(window.location.search).get('oauth_code'); if (!handoffCode || googleHandoffStarted.current) return; googleHandoffStarted.current = true; api.exchangeGoogleOAuthCode(handoffCode).then((tokens) => { authStore.set(tokens); setAuthenticated(true); }).catch((error) => setOauthError(error.message || 'Google sign-in could not be completed.')).finally(() => window.history.replaceState({}, document.title, window.location.pathname)); }, []);
   const go = (next, id, workspace) => { setPage(next); setParams({ id, workspace }); }; const logout = async () => { try { await api.logout(); } catch (_) {} authStore.clear(); setAuthenticated(false); setPage('dashboard'); };
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} oauthError={oauthError} />;
-  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
+  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <WorkspaceSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
   return <AppShell page={page} setPage={setPage} onLogout={logout} user={user}>{content}</AppShell>;
 }

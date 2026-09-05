@@ -15,7 +15,7 @@ WorkspaceColor = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)
 ]
 WorkspaceType = Literal["PERSONAL", "INSTITUTION"]
-WorkspaceVisibility = Literal["PRIVATE", "SHARED"]
+WorkspaceVisibility = Literal["PRIVATE", "SHARED", "PUBLIC"]
 WorkspaceRole = Literal["OWNER", "ADMIN", "EDITOR", "VIEWER"]
 
 

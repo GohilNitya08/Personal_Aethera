@@ -79,6 +79,16 @@ export const api = {
   createShare: (payload) => request('/shares', json('POST', payload)),
   updateShare: (id, payload) => request(`/shares/${id}`, json('PUT', payload)),
   revokeShare: (id) => request(`/shares/${id}/revoke`, { method: 'POST' }),
+  updateWorkspace: (id, payload) => request(`/workspaces/${id}`, json('PUT', payload)),
+  deleteWorkspace: (id) => request(`/workspaces/${id}`, { method: 'DELETE' }),
+  searchWorkspaces: (query) => request(`/workspaces/search?query=${encodeURIComponent(query)}`),
+  requestJoinWorkspace: (workspaceId) => request('/join-requests', json('POST', { workspace_id: workspaceId })),
+  getJoinRequests: (workspaceId) => request(`/join-requests/workspaces/${workspaceId}?status=PENDING`),
+  approveJoinRequest: (requestId) => request(`/join-requests/${requestId}/approve`, { method: 'POST' }),
+  rejectJoinRequest: (requestId) => request(`/join-requests/${requestId}/reject`, { method: 'POST' }),
+  bulkApproveJoinRequests: (workspaceId, requestIds) => request(`/join-requests/workspaces/${workspaceId}/bulk-approve`, json('POST', { request_ids: requestIds })),
+  updateFolder: (folderId, data) => request(`/folders/${folderId}`, json('PUT', data)),
+  deleteFolder: (folderId) => request(`/folders/${folderId}`, { method: 'DELETE' }),
 };
 
 export { API_BASE_URL };

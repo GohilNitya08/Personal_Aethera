@@ -169,6 +169,43 @@ class WorkspaceRepository:
         )
         return [Workspace.from_row(row) for row in rows]
 
+    def search_workspaces(self, query: str, user_id: int) -> list[Workspace]:
+        """Discover active workspaces by identifier, name, or description.
+
+        Discovery is deliberately broader than access: private workspaces can be
+        found so an authenticated user can request membership, but their folders
+        and files remain protected by the service-layer access checks.
+        """
+        search_pattern = f"%{query}%"
+        rows = (
+            self._db.execute(
+                text(
+                    """
+                    SELECT w.workspace_id, w.user_id, w.workspace_name, w.description,
+                           w.workspace_type, w.visibility, w.storage_used,
+                           w.storage_limit, w.color, w.is_archived, w.created_at,
+                           w.updated_at,
+                           COALESCE(wm.role, CASE WHEN w.user_id = :user_id THEN 'OWNER' END)
+                               AS member_role
+                    FROM workspaces AS w
+                    LEFT JOIN workspace_members AS wm
+                      ON wm.workspace_id = w.workspace_id AND wm.user_id = :user_id
+                    WHERE w.is_archived = FALSE
+                      AND (
+                          CAST(w.workspace_id AS CHAR) LIKE :query
+                          OR w.workspace_name LIKE :query
+                          OR w.description LIKE :query
+                      )
+                    ORDER BY w.updated_at DESC, w.workspace_id DESC
+                    """
+                ),
+                {"user_id": user_id, "query": search_pattern},
+            )
+            .mappings()
+            .all()
+        )
+        return [Workspace.from_row(row) for row in rows]
+
     def get_membership(self, workspace_id: int, user_id: int) -> WorkspaceMember | None:
         """Return one user's membership for a workspace."""
         row = (

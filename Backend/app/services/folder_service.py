@@ -67,7 +67,9 @@ class FolderService:
         self, workspace_id: int, actor_id: int, *, include_archived: bool
     ) -> list[Folder]:
         """List folders in a workspace available to the current member."""
-        self._require_workspace_access(workspace_id, actor_id)
+        role = self._require_workspace_access(workspace_id, actor_id)
+        if include_archived and role is None:
+            raise FolderPermissionError
         return self._repository.list_by_workspace(
             workspace_id, include_archived=include_archived
         )
@@ -196,15 +198,13 @@ class FolderService:
             raise FolderNotFoundError
         return folder
 
-    def _require_workspace_access(self, workspace_id: int, actor_id: int) -> str:
+    def _require_workspace_access(self, workspace_id: int, actor_id: int) -> str | None:
         try:
             workspace = self._workspace_service.get_workspace(workspace_id, actor_id)
         except WorkspaceNotFoundError as error:
             raise FolderNotFoundError("Workspace not found") from error
         except WorkspacePermissionError as error:
             raise FolderPermissionError from error
-        if workspace.member_role is None:
-            raise FolderPermissionError
         return workspace.member_role
 
     def _require_workspace_writer(self, workspace_id: int, actor_id: int) -> str:
@@ -215,6 +215,10 @@ class FolderService:
 
     def _require_folder_manager(self, folder: Folder, actor_id: int) -> None:
         self._require_workspace_writer(folder.workspace_id, actor_id)
+
+    def _require_folder_deleter(self, folder: Folder, actor_id: int) -> None:
+        """Folders use the same writer-role rule for rename, move, delete, and restore."""
+        self._require_folder_manager(folder, actor_id)
 
     def _validate_parent(self, *, workspace_id: int, parent_folder_id: int | None) -> None:
         if parent_folder_id is None:

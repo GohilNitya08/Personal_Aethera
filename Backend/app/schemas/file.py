@@ -79,7 +79,7 @@ class FileResponse(BaseModel):
     file_extension: str | None
     mime_type: str | None
     file_size: int
-    storage_path: str
+    storage_path: str | None
     file_hash: str
     ai_enabled: bool
     is_archived: bool
@@ -95,7 +95,7 @@ class FileVersionResponse(BaseModel):
     version_id: int
     file_id: int
     version_number: int
-    storage_path: str
+    storage_path: str | None
     file_size: int
     file_hash: str
     uploaded_by: int

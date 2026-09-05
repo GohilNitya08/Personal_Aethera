@@ -70,6 +70,19 @@ def list_workspaces(
     ]
 
 
+@router.get("/search", response_model=list[WorkspaceResponse], summary="Search workspaces")
+def search_workspaces(
+    query: Annotated[str, Query(min_length=1)],
+    current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
+    service: Annotated[WorkspaceService, Depends(get_workspace_service)],
+) -> list[WorkspaceResponse]:
+    """Search across public and user-accessible workspaces."""
+    return [
+        _workspace_response(workspace)
+        for workspace in service.search_workspaces(query, current_user.user_id)
+    ]
+
+
 @router.get(
     "/{workspace_id}/members",
     response_model=list[WorkspaceMemberResponse],
