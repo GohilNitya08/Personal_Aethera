@@ -27,9 +27,8 @@ class Settings(BaseSettings):
     mysql_password: str = ""
     mysql_database: str = "aethera"
 
-    gcs_bucket_name: str = ""
-    gcs_object_prefix: str = "aethera"
-    gcs_signed_url_expire_minutes: int = Field(default=15, gt=0, le=60)
+    s3_bucket_name: str = ""
+    s3_signed_url_expire_minutes: int = Field(default=15, gt=0, le=60)
     max_upload_size_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
     smtp_host: str = ""
     smtp_port: int = Field(default=587, gt=0, le=65535)

@@ -30,11 +30,12 @@ from app.services.file_service import (
 from app.services.folder_service import FolderService
 from app.services.workspace_service import WorkspaceService
 from app.services.storage_service import (
-    CloudStorageService,
     ObjectStorage,
+    S3StorageService,
     StorageDownloadError,
     StorageNotConfiguredError,
     StorageUploadError,
+    get_storage_service,
 )
 
 router = APIRouter(tags=["files"])
@@ -51,10 +52,6 @@ def get_file_service(
     return FileService(FileRepository(db), folder_service, workspace_service)
 
 
-def get_storage_service() -> ObjectStorage:
-    return CloudStorageService()
-
-
 @router.post(
     "/folders/{folder_id}/files/upload",
     response_model=FileResponse,
@@ -69,7 +66,7 @@ def upload_file(
     storage: Annotated[ObjectStorage, Depends(get_storage_service)],
 ) -> FileResponse:
     try:
-        file = service.upload_file(current_user.user_id, folder_id, upload, storage)
+        file = service.upload_file(current_user.user_id, current_user.username, folder_id, upload, storage)
     except (FileNotFoundError, FilePermissionError, FileConflictError) as error:
         raise _file_http_exception(error) from error
     except StorageNotConfiguredError as error:

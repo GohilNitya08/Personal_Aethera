@@ -86,7 +86,7 @@ class FileService:
         return file
 
     def upload_file(
-        self, actor_id: int, folder_id: int, upload: UploadFile,
+        self, actor_id: int, actor_username: str, folder_id: int, upload: UploadFile,
         storage: ObjectStorage,
     ) -> FileRecord:
         """Upload bytes privately before creating the corresponding metadata."""
@@ -105,7 +105,8 @@ class FileService:
                 raise FileConflictError("File exceeds the configured upload size limit")
             digest.update(chunk)
         upload.file.seek(0)
-        object_key = self._object_key(folder.workspace_id, folder_id)
+        workspace = self._workspace_service.get_workspace(folder.workspace_id, actor_id)
+        object_key = self._object_key(actor_id, actor_username, workspace.workspace_name, folder.folder_name, original_name)
         values = {
             "folder_id": folder_id,
             "file_name": original_name,
@@ -390,6 +391,19 @@ class FileService:
         return workspace.member_role is None
 
     @staticmethod
-    def _object_key(workspace_id: int, folder_id: int) -> str:
+    def _object_key(
+        actor_id: int, actor_username: str,
+        workspace_name: str, folder_name: str, original_name: str
+    ) -> str:
         """Build the stable, server-owned key for a multipart upload."""
-        return f"workspaces/{workspace_id}/folders/{folder_id}/{uuid.uuid4()}"
+        import re
+        def sanitize(name: str) -> str:
+            # Replace non-alphanumeric or standard safe characters with '_'
+            return re.sub(r'[^a-zA-Z0-9_\-\.]', '_', name)
+            
+        return (
+            f"{sanitize(actor_username)}_{actor_id:04d}/"
+            f"{sanitize(workspace_name)}/"
+            f"{sanitize(folder_name)}/"
+            f"{sanitize(original_name)}"
+        )

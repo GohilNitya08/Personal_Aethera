@@ -150,4 +150,5 @@ def _share_response(share: FileShare) -> ShareResponse:
         password_protected=share.password_hash is not None,
         expires_at=share.expires_at,
         created_at=share.created_at,
+        file_name=getattr(share, "file_name", None),
     )

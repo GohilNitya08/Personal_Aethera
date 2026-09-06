@@ -67,6 +67,7 @@ export const api = {
   user: (id) => request(`/users/${id}`),
   createWorkspace: (payload) => request('/workspaces', json('POST', payload)),
   folders: (workspaceId) => request(`/workspaces/${workspaceId}/folders`),
+  folder: (id) => request(`/folders/${id}`),
   folderTree: (workspaceId) => request(`/workspaces/${workspaceId}/tree`),
   createFolder: (payload) => request('/folders', json('POST', payload)),
   files: (folderId, { includeDeleted = false } = {}) => request(`/folders/${folderId}/files${includeDeleted ? '?include_deleted=true' : ''}`),

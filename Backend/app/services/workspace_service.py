@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,9 @@ from app.repositories.workspace_repository import (
     WorkspaceMember,
     WorkspaceRepository,
 )
+from app.services.storage_service import ObjectStorage
+
+logger = logging.getLogger(__name__)
 from app.schemas.workspace import (
     WorkspaceCreateRequest,
     WorkspaceInvitationRequest,
@@ -116,9 +120,22 @@ class WorkspaceService:
             raise
         return self.get_workspace(workspace_id, actor_id)
 
-    def delete_workspace(self, workspace_id: int, actor_id: int) -> None:
-        """Permanently delete a workspace when requested by its owner."""
+    def get_storage_keys_for_workspace(self, workspace_id: int) -> list[str]:
+        """Return all S3 storage keys associated with files in a workspace."""
+        if hasattr(self._repository, "get_storage_keys"):
+            return self._repository.get_storage_keys(workspace_id)
+        return []
+
+    def delete_workspace(
+        self, workspace_id: int, actor_id: int, storage: ObjectStorage | None = None
+    ) -> None:
+        """Permanently delete a workspace and its dependent records, then clean up S3 objects."""
         self._require_owner(workspace_id, actor_id)
+
+        # 1. Collect all S3 keys before DB records are deleted
+        storage_keys = self.get_storage_keys_for_workspace(workspace_id)
+
+        # 2. Perform the database deletion transaction and record activity
         try:
             self._repository.record_activity(
                 workspace_id=workspace_id,
@@ -128,10 +145,24 @@ class WorkspaceService:
             )
             if not self._repository.delete_workspace(workspace_id):
                 raise WorkspaceNotFoundError
+            # 3. Commit the DB deletion
             self._repository.commit()
         except Exception:
             self._repository.rollback()
             raise
+
+        # 4. Then attempt S3 cleanup through the existing ObjectStorage abstraction
+        if storage is not None and storage_keys:
+            for key in storage_keys:
+                try:
+                    storage.delete(key)
+                except Exception as error:
+                    logger.error(
+                        "Failed to delete S3 object '%s' for deleted workspace %s (orphaned S3 object): %s",
+                        key,
+                        workspace_id,
+                        error,
+                    )
 
     def get_members(self, workspace_id: int, actor_id: int) -> list[WorkspaceMember]:
         """List members of a workspace available to the caller."""

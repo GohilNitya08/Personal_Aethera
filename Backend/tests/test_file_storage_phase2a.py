@@ -28,7 +28,7 @@ class FakeWorkspaceService:
         role = self.roles.get(actor_id)
         if role is None:
             raise WorkspacePermissionError
-        return SimpleNamespace(workspace_id=workspace_id, member_role=role)
+        return SimpleNamespace(workspace_id=workspace_id, workspace_name="Private Workspace", member_role=role)
 
     def reserve_storage(self, workspace_id: int, actor_id: int, byte_count: int) -> None:
         self.get_workspace(workspace_id, actor_id)
@@ -129,18 +129,27 @@ def test_multipart_upload_generates_private_server_owned_key_and_actual_metadata
     storage = FakeStorage()
     data = b"actual uploaded bytes"
 
-    result = service.upload_file(1, 20, upload("personal plan.pdf", data), storage)
+    result = service.upload_file(1, "testuser", 20, upload("personal plan.pdf", data), storage)
 
     assert result.file_size == len(data)
     assert result.file_hash == hashlib.sha256(data).hexdigest()
-    assert result.storage_path.startswith("workspaces/10/folders/20/")
-    assert result.storage_path.count("/") == 4
-    assert uuid.UUID(result.storage_path.rsplit("/", 1)[1]).version == 4
-    assert "personal plan.pdf" not in result.storage_path
     assert result.original_file_name == "personal plan.pdf"
+    assert result.storage_path == "testuser_0001/Private_Workspace/Private_names/personal_plan.pdf"
     assert storage.uploaded == [(result.storage_path, data)]
     assert workspace.storage_used == len(data)
     assert repository.values is not None
+
+
+def test_object_key_sanitization():
+    service, _, _ = make_service()
+    key = service._object_key(
+        actor_id=42,
+        actor_username="hello@world.com",
+        workspace_name="My Workspace!!",
+        folder_name="Nested/Folder",
+        original_name="File with spaces (1).txt"
+    )
+    assert key == "hello_world.com_0042/My_Workspace__/Nested_Folder/File_with_spaces__1_.txt"
 
 
 def test_quota_is_enforced_without_uploading_or_consuming_storage():
@@ -148,7 +157,7 @@ def test_quota_is_enforced_without_uploading_or_consuming_storage():
     storage = FakeStorage()
 
     with pytest.raises(FileConflictError, match="quota"):
-        service.upload_file(1, 20, upload(data=b"four"), storage)
+        service.upload_file(1, "testuser", 20, upload(data=b"four"), storage)
 
     assert workspace.storage_used == 0
     assert storage.uploaded == []
@@ -159,7 +168,7 @@ def test_storage_failure_rolls_back_quota_without_metadata_or_cleanup_attempt():
     storage = FakeStorage(upload_error=True)
 
     with pytest.raises(StorageUploadError):
-        service.upload_file(1, 20, upload(data=b"data"), storage)
+        service.upload_file(1, "testuser", 20, upload(data=b"data"), storage)
 
     assert workspace.storage_used == 0
     assert repository.values is None
@@ -171,7 +180,7 @@ def test_metadata_failure_rolls_back_quota_and_deletes_uploaded_object():
     storage = FakeStorage()
 
     with pytest.raises(RuntimeError, match="metadata"):
-        service.upload_file(1, 20, upload(data=b"data"), storage)
+        service.upload_file(1, "testuser", 20, upload(data=b"data"), storage)
 
     assert workspace.storage_used == 0
     assert storage.deleted == [storage.uploaded[0][0]]
@@ -180,18 +189,18 @@ def test_metadata_failure_rolls_back_quota_and_deletes_uploaded_object():
 @pytest.mark.parametrize("role", ["OWNER", "ADMIN", "EDITOR"])
 def test_writer_roles_can_upload(role: str):
     service, _, _ = make_service(roles={1: role})
-    assert service.upload_file(1, 20, upload(), FakeStorage()).uploaded_by == 1
+    assert service.upload_file(1, "testuser", 20, upload(), FakeStorage()).uploaded_by == 1
 
 
 def test_viewer_cannot_upload():
     service, _, _ = make_service(roles={1: "VIEWER"})
     with pytest.raises(FilePermissionError):
-        service.upload_file(1, 20, upload(), FakeStorage())
+        service.upload_file(1, "testuser", 20, upload(), FakeStorage())
 
 
 def test_soft_delete_and_restore_do_not_change_stored_quota():
     service, repository, workspace = make_service()
-    uploaded = service.upload_file(1, 20, upload(data=b"data"), FakeStorage())
+    uploaded = service.upload_file(1, "testuser", 20, upload(data=b"data"), FakeStorage())
     usage = workspace.storage_used
 
     service.delete_file(uploaded.file_id, 1)
@@ -203,7 +212,7 @@ def test_soft_delete_and_restore_do_not_change_stored_quota():
 
 def test_download_requires_workspace_access_and_returns_temporary_url():
     service, repository, _ = make_service(roles={1: "EDITOR"})
-    uploaded = service.upload_file(1, 20, upload(), FakeStorage())
+    uploaded = service.upload_file(1, "testuser", 20, upload(), FakeStorage())
     storage = FakeStorage()
 
     assert service.get_download_url(uploaded.file_id, 1, storage).startswith("https://private.example/")

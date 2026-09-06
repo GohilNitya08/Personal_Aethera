@@ -24,6 +24,7 @@ from app.schemas.workspace import (
     WorkspaceStorageUpdateRequest,
     WorkspaceUpdateRequest,
 )
+from app.services.storage_service import ObjectStorage, get_storage_service
 from app.services.workspace_service import (
     WorkspaceConflictError,
     WorkspaceNotFoundError,
@@ -360,10 +361,11 @@ def delete_workspace(
     workspace_id: WorkspaceId,
     current_user: Annotated[AuthUser, Depends(get_current_auth_user)],
     service: Annotated[WorkspaceService, Depends(get_workspace_service)],
+    storage: Annotated[ObjectStorage, Depends(get_storage_service)],
 ) -> Response:
     """Permanently delete a workspace when requested by its owner."""
     try:
-        service.delete_workspace(workspace_id, current_user.user_id)
+        service.delete_workspace(workspace_id, current_user.user_id, storage=storage)
     except (WorkspaceNotFoundError, WorkspacePermissionError) as error:
         raise _workspace_http_exception(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -133,6 +133,15 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
   const membersState = useAsync(() => workspace?.member_role ? api.workspaceMembers(workspaceId) : Promise.resolve([]), [workspaceId, workspace?.member_role]);
   const [folderName, setFolderName] = useState('');
   const [notice, setNotice] = useState('');
+  const [pendingDeleteFolder, setPendingDeleteFolder] = useState(null);
+  const [busyFolderDelete, setBusyFolderDelete] = useState(false);
+
+  const canDeleteFolder = (fld) => {
+    if (workspace?.member_role === 'OWNER' || workspace?.member_role === 'ADMIN') return true;
+    if (workspace?.member_role === 'EDITOR' && sameUserId(fld.created_by, currentUser?.user_id)) return true;
+    return false;
+  };
+
   const createFolder = async (event) => {
     event.preventDefault();
     try {
@@ -143,6 +152,21 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
       setNotice(err.message);
     }
   };
+
+  const confirmDeleteFolder = async () => {
+    if (!pendingDeleteFolder) return;
+    setBusyFolderDelete(true);
+    try {
+      await api.deleteFolder(pendingDeleteFolder.folder_id);
+      setPendingDeleteFolder(null);
+      await foldersState.reload();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusyFolderDelete(false);
+    }
+  };
+
   if (error) return <ErrorState message={error} retry={reload} />;
   if (loading) return <Loading />;
   const canWrite = ['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role);
@@ -165,10 +189,66 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
           <button className="button secondary">Add folder</button>
         </form>}
         {notice && <div className="notice">{notice}</div>}
-        {foldersState.error ? <ErrorState message={foldersState.error} retry={foldersState.reload} /> : foldersState.loading ? <Loading /> : foldersState.data.length ? (
-          <div className="folder-grid">{foldersState.data.map((folder) => <div className="folder-card" key={folder.folder_id} style={{position:'relative'}}>{canWrite && <><button className="text-button" style={{position:'absolute', top:5, right:5, color:'#bf4c43'}} onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete folder?')) { api.deleteFolder(folder.folder_id).then(() => foldersState.reload()).catch(err => alert(err.message)); } }}>×</button><button className="text-button" style={{position:'absolute', top:5, right:25}} onClick={(e) => { e.stopPropagation(); const nn = window.prompt('New folder name:', folder.folder_name); if (nn && nn !== folder.folder_name) { api.updateFolder(folder.folder_id, { folder_name: nn }).then(() => foldersState.reload()).catch(err => alert(err.message)); } }}>✎</button></>}<button className="folder-inner" style={{background:'transparent', border:0, textAlign:'left', padding:0, margin:0, display:'grid', gap:7}} onClick={() => go('folder', folder.folder_id, workspace)}><span>▰</span><b>{folder.folder_name}</b><small>{folder.description || 'Folder'}</small></button></div>)}</div>
+        {foldersState.error ? <ErrorState message={foldersState.error} retry={foldersState.reload} /> : foldersState.loading ? <Loading /> : (foldersState.data || []).filter((item) => !item.parent_folder_id).length ? (
+          <div className="folder-grid">{(foldersState.data || []).filter((item) => !item.parent_folder_id).map((folder) => (
+            <div className="folder-card" key={folder.folder_id} style={{ position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 5, right: 5, display: 'flex', gap: 4 }}>
+                {canWrite && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    title="Rename folder"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const nn = window.prompt('New folder name:', folder.folder_name);
+                      if (nn && nn !== folder.folder_name) {
+                        api.updateFolder(folder.folder_id, { folder_name: nn })
+                          .then(() => foldersState.reload())
+                          .catch(err => alert(err.message));
+                      }
+                    }}
+                  >
+                    ✎
+                  </button>
+                )}
+                {canDeleteFolder(folder) && (
+                  <button
+                    type="button"
+                    className="text-button danger"
+                    title="Delete folder"
+                    style={{ color: '#bf4c43' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDeleteFolder(folder);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button
+                className="folder-inner"
+                style={{ background: 'transparent', border: 0, textAlign: 'left', padding: 0, margin: 0, display: 'grid', gap: 7, width: '100%' }}
+                onClick={() => go('folder', folder.folder_id, workspace)}
+              >
+                <span>▰</span>
+                <b>{folder.folder_name}</b>
+                <small>{folder.description || 'Folder'}</small>
+              </button>
+            </div>
+          ))}</div>
         ) : <Empty title="This workspace is empty" body="Create a folder to begin organizing files." />}
       </section>
+      {pendingDeleteFolder && (
+        <ConfirmDialog
+          title={`Delete "${pendingDeleteFolder.folder_name}"?`}
+          body="This folder and its contents will be deleted. Are you sure you want to proceed?"
+          confirmLabel="Delete folder"
+          busy={busyFolderDelete}
+          onCancel={() => setPendingDeleteFolder(null)}
+          onConfirm={confirmDeleteFolder}
+        />
+      )}
       {workspace.member_role && <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} />}
       {workspace.member_role === 'OWNER' && <JoinRequestsPanel workspaceId={workspaceId} onMembersChanged={() => membersState.reload()} />}
       <WorkspaceSettings workspace={workspace} reload={reload} goBack={back} />
@@ -200,7 +280,43 @@ function WorkspaceSettings({ workspace, reload, goBack }) {
   const save = async (e) => { e.preventDefault(); setBusy(true); try { await api.updateWorkspace(workspace.workspace_id, form); await reload(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
   const confirmDelete = async () => { setBusy(true); try { await api.deleteWorkspace(workspace.workspace_id); goBack(); } catch (e) { alert(e.message); setBusy(false); } };
   if (workspace.member_role !== 'OWNER' && workspace.member_role !== 'ADMIN') return null;
-  return <section className="panel"><div className="panel-head"><div><h3>Workspace Settings</h3></div></div><form className="inline-form" onSubmit={save}><Field label="Name" value={form.workspace_name} onChange={v => setForm({...form, workspace_name: v})} required /><label className="field"><span>Visibility</span><select value={form.visibility} onChange={e => setForm({...form, visibility: e.target.value})}><option value="PRIVATE">Private</option><option value="SHARED">Shared</option><option value="PUBLIC">Public</option></select></label><button className="button primary" disabled={busy}>Save Changes</button></form><div className="divider" /><div><button className="button danger text-button" onClick={() => setPendingDelete(true)}>Delete Workspace</button></div>{pendingDelete && <ConfirmDialog title="Delete Workspace?" body="This action is irreversible." confirmLabel="Delete" busy={busy} onCancel={() => setPendingDelete(false)} onConfirm={confirmDelete} />}</section>;
+  return (
+    <section className="panel">
+      <div className="panel-head"><div><h3>Workspace Settings</h3></div></div>
+      <form className="inline-form" onSubmit={save}>
+        <Field label="Name" value={form.workspace_name} onChange={v => setForm({...form, workspace_name: v})} required />
+        <label className="field">
+          <span>Visibility</span>
+          <select value={form.visibility} onChange={e => setForm({...form, visibility: e.target.value})}>
+            <option value="PRIVATE">Private</option>
+            <option value="SHARED">Shared</option>
+            <option value="PUBLIC">Public</option>
+          </select>
+        </label>
+        <button className="button primary" disabled={busy}>Save Changes</button>
+      </form>
+      {workspace.member_role === 'OWNER' && (
+        <>
+          <div className="divider" />
+          <div>
+            <button className="button danger text-button" onClick={() => setPendingDelete(true)}>
+              Delete Workspace
+            </button>
+          </div>
+          {pendingDelete && (
+            <ConfirmDialog
+              title="Delete Workspace?"
+              body="This action is irreversible and permanently deletes the workspace, all its folders, files, and memberships."
+              confirmLabel="Delete"
+              busy={busy}
+              onCancel={() => setPendingDelete(false)}
+              onConfirm={confirmDelete}
+            />
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 function memberDisplayName(profile, member, currentUser) {
@@ -480,16 +596,16 @@ function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, o
   );
 }
 
-function FolderBrowser({ folderId, workspace, back, go }) {
-  const { data: folder, loading: folderLoading, error: folderError } = useAsync(
-    () => api.folders(workspace.workspace_id).then((all) => all.find((item) => item.folder_id === folderId)),
-    [folderId, workspace.workspace_id],
-  );
+function FolderBrowser({ folderId, workspace, back, go, currentUser }) {
+  const { data: folder, loading: folderLoading, error: folderError } = useAsync(() => api.folder(folderId), [folderId]);
+  const foldersState = useAsync(() => api.folders(workspace.workspace_id), [workspace.workspace_id]);
   const [showTrash, setShowTrash] = useState(false);
   const filesState = useAsync(() => api.files(folderId, { includeDeleted: showTrash }), [folderId, showTrash]);
   const [selected, setSelected] = useState(null);
   const [details, setDetails] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [pendingFolderDelete, setPendingFolderDelete] = useState(false);
+  const [busyFolderDelete, setBusyFolderDelete] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [notice, setNotice] = useState({ text: '', tone: '' });
@@ -498,6 +614,8 @@ function FolderBrowser({ folderId, workspace, back, go }) {
   const visibleFiles = (filesState.data || []).filter((file) => (showTrash ? file.is_deleted : !file.is_deleted));
   const canWrite = ['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role);
   const canManageFiles = ['OWNER', 'ADMIN'].includes(workspace.member_role);
+  const canDeleteCurrentFolder = ['OWNER', 'ADMIN'].includes(workspace.member_role) || (workspace.member_role === 'EDITOR' && sameUserId(folder?.created_by, currentUser?.user_id));
+  const childFolders = (foldersState.data || []).filter((item) => item.parent_folder_id === folderId);
 
   const upload = async (event) => {
     const file = event.target.files?.[0];
@@ -588,9 +706,15 @@ function FolderBrowser({ folderId, workspace, back, go }) {
               </button>
             </>
           )}
+          {canDeleteCurrentFolder && (
+            <button type="button" className="button secondary danger text-button" onClick={() => setPendingFolderDelete(true)}>
+              Delete folder
+            </button>
+          )}
         </div>
       </section>
       {notice.text && <div className={`notice${notice.tone === 'success' ? ' success' : ''}`}>{notice.text}</div>}
+
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -603,12 +727,16 @@ function FolderBrowser({ folderId, workspace, back, go }) {
             <div className="table-head"><span>Name</span><span>Type</span><span>Size</span><span>Updated</span><span></span></div>
             {visibleFiles.map((file) => (
               <div className="file-row" key={file.file_id}>
-                <span><b>▧</b> {file.file_name}{file.is_deleted ? <small className="muted"> · deleted</small> : null}</span>
+                <span><b>▧</b> {file.file_name || file.original_file_name || file.name || `File #${file.file_id}`}{file.is_deleted ? <small className="muted"> · deleted</small> : null}</span>
                 <span>{file.mime_type || file.file_extension || '—'}</span>
                 <span>{formatBytes(file.file_size)}</span>
                 <span>{formatDate(file.updated_at)}</span>
                 <div className="member-actions">
-                  <button type="button" className="text-button" onClick={() => setDetails(file)}>Details</button>
+                  <button type="button" className="text-button" onClick={async () => {
+                    setDetails(file);
+                    if (file.is_deleted) return;
+                    try { setDetails(await api.file(file.file_id)); } catch (_) { /* keep listed metadata */ }
+                  }}>Details</button>
                   {!file.is_deleted && (
                     <>
                       <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => download(file)}>
@@ -661,6 +789,25 @@ function FolderBrowser({ folderId, workspace, back, go }) {
           onConfirm={confirmDelete}
         />
       )}
+      {pendingFolderDelete && (
+        <ConfirmDialog
+          title={`Delete "${folder?.folder_name}"?`}
+          body="This folder and all its contents will be deleted. This action cannot be undone."
+          confirmLabel="Delete folder"
+          busy={busyFolderDelete}
+          onCancel={() => setPendingFolderDelete(false)}
+          onConfirm={async () => {
+            setBusyFolderDelete(true);
+            try {
+              await api.deleteFolder(folderId);
+              go('workspace', workspace.workspace_id);
+            } catch (err) {
+              alert(err.message);
+              setBusyFolderDelete(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -669,7 +816,7 @@ function ShareDialog({ file, close, onCreated }) { const [form, setForm] = useSt
   return <div className="modal-backdrop"><form className="modal" onSubmit={submit}><button type="button" className="modal-close" onClick={close}>×</button><p className="eyebrow">SHARE FILE</p><h3>{file.file_name}</h3><label className="field"><span>Share type</span><select value={form.share_type} onChange={(e) => setForm({ ...form, share_type: e.target.value })}><option value="LINK">Link</option><option value="PUBLIC">Public</option><option value="PRIVATE">Private</option></select></label>{form.share_type === 'PRIVATE' && <Field label="Recipient user ID" type="number" value={form.shared_with} onChange={(shared_with) => setForm({ ...form, shared_with })} required />}<label className="field"><span>Permission</span><select value={form.permission} onChange={(e) => setForm({ ...form, permission: e.target.value })}><option value="VIEW">View</option><option value="EDIT">Edit</option></select></label><label className="field"><span>Expiration</span><select value={form.expires_at ? 'date' : 'never'} onChange={(e) => setForm({ ...form, expires_at: e.target.value === 'never' ? '' : form.expires_at || new Date(Date.now() + 86400000).toISOString().slice(0, 16) })}><option value="never">Never</option><option value="date">Expiration date/time</option></select></label>{form.expires_at && <Field label="Expires at" type="datetime-local" value={form.expires_at} onChange={(expires_at) => setForm({ ...form, expires_at })} required />}{error && <div className="notice">{error}</div>}<button className="button primary">Create share</button></form></div>; }
 
 function SharedFiles() { const state = useAsync(api.shares, []); const revoke = async (id) => { if (!window.confirm('Revoke this share?')) return; try { await api.revokeShare(id); state.reload(); } catch (error) { alert(error.message); } };
-  return <div className="page-content"><section className="panel"><div className="panel-head"><div><h3>Shared files</h3><p>Shares available to you or created by you.</p></div></div>{state.error ? <ErrorState message={state.error} retry={state.reload} /> : state.loading ? <Loading /> : state.data.length ? <div className="file-table"><div className="table-head"><span>File ID</span><span>Access</span><span>Shared with</span><span>Created</span><span></span></div>{state.data.map((share) => <div className="file-row" key={share.share_id}><span>File #{share.file_id}</span><span>{share.share_type} · {share.permission}</span><span>{share.shared_with ? `User #${share.shared_with}` : 'Link / public'}</span><span>{formatDate(share.created_at)}</span><button className="text-button danger" onClick={() => revoke(share.share_id)}>Revoke</button></div>)}</div> : <Empty title="No shared files yet" body="When a file is shared through AETHERA, it will appear here." />}</section></div>; }
+  return <div className="page-content"><section className="panel"><div className="panel-head"><div><h3>Shared files</h3><p>Shares available to you or created by you.</p></div></div>{state.error ? <ErrorState message={state.error} retry={state.reload} /> : state.loading ? <Loading /> : state.data.length ? <div className="file-table"><div className="table-head"><span>File</span><span>Access</span><span>Shared with</span><span>Created</span><span></span></div>{state.data.map((share) => <div className="file-row" key={share.share_id}><span><b>▧</b> {share.file_name || `File #${share.file_id}`}</span><span>{share.share_type} · {share.permission}</span><span>{share.shared_with ? `User #${share.shared_with}` : 'Link / public'}</span><span>{formatDate(share.created_at)}</span><button className="text-button danger" onClick={() => revoke(share.share_id)}>Revoke</button></div>)}</div> : <Empty title="No shared files yet" body="When a file is shared through AETHERA, it will appear here." />}</section></div>; }
 
 function Profile({ onUserChange }) { const state = useAsync(api.me, []); const [editing, setEditing] = useState(false); const [form, setForm] = useState(null); const [message, setMessage] = useState(''); useEffect(() => { if (state.data) setForm({ full_name: state.data.full_name, username: state.data.username, email: state.data.email, bio: state.data.bio || '' }); }, [state.data]); const save = async (e) => { e.preventDefault(); try { const user = await api.updateMe(form); onUserChange(user); setEditing(false); setMessage('Profile saved.'); state.reload(); } catch (err) { setMessage(err.message); } };
   if (state.error) return <ErrorState message={state.error} retry={state.reload} />; if (state.loading || !form) return <Loading />; const user = state.data;
@@ -683,6 +830,6 @@ function WorkspaceSearch({ go }) { const [query, setQuery] = useState(''); const
 export default function App() { const [authenticated, setAuthenticated] = useState(Boolean(authStore.token)); const [page, setPage] = useState('dashboard'); const [params, setParams] = useState({}); const [user, setUser] = useState(null); const [oauthError, setOauthError] = useState(''); const googleHandoffStarted = useRef(false); const me = useAsync(() => authenticated ? api.me() : Promise.resolve(null), [authenticated]); useEffect(() => { if (me.data) setUser(me.data); }, [me.data]); useEffect(() => { const handler = () => setAuthenticated(false); window.addEventListener('aethera:unauthorized', handler); return () => window.removeEventListener('aethera:unauthorized', handler); }, []); useEffect(() => { const handoffCode = new URLSearchParams(window.location.search).get('oauth_code'); if (!handoffCode || googleHandoffStarted.current) return; googleHandoffStarted.current = true; api.exchangeGoogleOAuthCode(handoffCode).then((tokens) => { authStore.set(tokens); setAuthenticated(true); }).catch((error) => setOauthError(error.message || 'Google sign-in could not be completed.')).finally(() => window.history.replaceState({}, document.title, window.location.pathname)); }, []);
   const go = (next, id, workspace) => { setPage(next); setParams({ id, workspace }); }; const logout = async () => { try { await api.logout(); } catch (_) {} authStore.clear(); setAuthenticated(false); setPage('dashboard'); };
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} oauthError={oauthError} />;
-  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <WorkspaceSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
+  let content = page === 'dashboard' ? <Dashboard go={go} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <WorkspaceSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} currentUser={user} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
   return <AppShell page={page} setPage={setPage} onLogout={logout} user={user}>{content}</AppShell>;
 }

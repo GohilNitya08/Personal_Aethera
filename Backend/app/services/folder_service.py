@@ -217,8 +217,15 @@ class FolderService:
         self._require_workspace_writer(folder.workspace_id, actor_id)
 
     def _require_folder_deleter(self, folder: Folder, actor_id: int) -> None:
-        """Folders use the same writer-role rule for rename, move, delete, and restore."""
-        self._require_folder_manager(folder, actor_id)
+        """Enforce resource permission rules:
+        - OWNER: can manage any folder
+        - ADMIN: can manage any folder
+        - EDITOR: can manage ONLY folders they created
+        - VIEWER: cannot manage folders
+        """
+        role = self._require_workspace_writer(folder.workspace_id, actor_id)
+        if role == "EDITOR" and folder.created_by != actor_id:
+            raise FolderPermissionError("Editors can only delete folders they created")
 
     def _validate_parent(self, *, workspace_id: int, parent_folder_id: int | None) -> None:
         if parent_folder_id is None:

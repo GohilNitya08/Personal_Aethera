@@ -24,6 +24,7 @@ class FileShare:
     password_hash: str | None
     expires_at: datetime | None
     created_at: datetime | None
+    file_name: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "FileShare":
@@ -38,6 +39,7 @@ class FileShare:
             password_hash=_optional_string(row["password_hash"]),
             expires_at=row["expires_at"],
             created_at=row["created_at"],
+            file_name=_optional_string(row.get("file_name")),
         )
 
 
@@ -80,8 +82,15 @@ class ShareRepository:
         row = (
             self._db.execute(
                 text(
-                    f"SELECT {self._SHARE_COLUMNS} FROM file_shares "
-                    "WHERE share_id = :share_id LIMIT 1"
+                    """
+                    SELECT fs.share_id, fs.file_id, fs.shared_by, fs.shared_with,
+                           fs.share_type, fs.permission, fs.share_link,
+                           fs.password_hash, fs.expires_at, fs.created_at,
+                           f.file_name
+                    FROM file_shares AS fs
+                    LEFT JOIN files AS f ON f.file_id = fs.file_id
+                    WHERE fs.share_id = :share_id LIMIT 1
+                    """
                 ),
                 {"share_id": share_id},
             )
@@ -95,11 +104,15 @@ class ShareRepository:
         rows = (
             self._db.execute(
                 text(
-                    f"""
-                    SELECT {self._SHARE_COLUMNS}
-                    FROM file_shares
-                    WHERE shared_by = :shared_by
-                    ORDER BY created_at DESC, share_id DESC
+                    """
+                    SELECT fs.share_id, fs.file_id, fs.shared_by, fs.shared_with,
+                           fs.share_type, fs.permission, fs.share_link,
+                           fs.password_hash, fs.expires_at, fs.created_at,
+                           f.file_name
+                    FROM file_shares AS fs
+                    LEFT JOIN files AS f ON f.file_id = fs.file_id
+                    WHERE fs.shared_by = :shared_by
+                    ORDER BY fs.created_at DESC, fs.share_id DESC
                     """
                 ),
                 {"shared_by": shared_by},

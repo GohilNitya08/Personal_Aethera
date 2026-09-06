@@ -81,6 +81,7 @@ class ShareResponse(BaseModel):
     password_protected: bool
     expires_at: datetime | None
     created_at: datetime | None
+    file_name: str | None = None
 
 
 def _validate_future_expiry(expires_at: datetime | None) -> datetime | None:

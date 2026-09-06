@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 
@@ -313,7 +313,7 @@ class WorkspaceRepository:
                 UPDATE workspaces
                 SET storage_used = storage_used + :byte_count, updated_at = UTC_TIMESTAMP()
                 WHERE workspace_id = :workspace_id
-                  AND storage_used + :byte_count <= storage_limit
+                  AND (storage_limit = 0 OR storage_used + :byte_count <= storage_limit)
                 """
             ),
             {"workspace_id": workspace_id, "byte_count": byte_count},
@@ -379,8 +379,110 @@ class WorkspaceRepository:
         self.update_member_role(workspace_id, previous_owner_id, "ADMIN")
         return self.update_member_role(workspace_id, new_owner_id, "OWNER")
 
+    def get_storage_keys(self, workspace_id: int) -> list[str]:
+        """Collect all S3 storage paths for files and versions in a workspace."""
+        rows = self._db.execute(
+            text(
+                """
+                SELECT DISTINCT storage_path FROM files
+                WHERE folder_id IN (SELECT folder_id FROM folders WHERE workspace_id = :workspace_id)
+                  AND storage_path IS NOT NULL AND storage_path != ''
+                UNION
+                SELECT DISTINCT fv.storage_path FROM file_versions AS fv
+                JOIN files AS f ON f.file_id = fv.file_id
+                JOIN folders AS fld ON fld.folder_id = f.folder_id
+                WHERE fld.workspace_id = :workspace_id
+                  AND fv.storage_path IS NOT NULL AND fv.storage_path != ''
+                """
+            ),
+            {"workspace_id": workspace_id},
+        ).mappings().all()
+        return [str(row["storage_path"]) for row in rows if row.get("storage_path")]
+
     def delete_workspace(self, workspace_id: int) -> bool:
-        """Delete a workspace; database foreign keys handle dependent records."""
+        """Cascade-delete all dependent records and the workspace itself."""
+        folder_rows = self._db.execute(
+            text("SELECT folder_id FROM folders WHERE workspace_id = :workspace_id"),
+            {"workspace_id": workspace_id},
+        ).mappings().all()
+        folder_ids = [int(r["folder_id"]) for r in folder_rows]
+
+        if folder_ids:
+            file_rows = self._db.execute(
+                text("SELECT file_id FROM files WHERE folder_id IN :folder_ids").bindparams(
+                    bindparam("folder_ids", expanding=True)
+                ),
+                {"folder_ids": folder_ids},
+            ).mappings().all()
+            file_ids = [int(r["file_id"]) for r in file_rows]
+
+            if file_ids:
+                self._db.execute(
+                    text("UPDATE activity_logs SET file_id = NULL WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM file_tags WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM favorites WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM comments WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM file_shares WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM file_versions WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+                self._db.execute(
+                    text("DELETE FROM files WHERE file_id IN :file_ids").bindparams(
+                        bindparam("file_ids", expanding=True)
+                    ),
+                    {"file_ids": file_ids},
+                )
+
+            self._db.execute(
+                text("UPDATE folders SET parent_folder_id = NULL WHERE folder_id IN :folder_ids").bindparams(
+                    bindparam("folder_ids", expanding=True)
+                ),
+                {"folder_ids": folder_ids},
+            )
+            self._db.execute(
+                text("DELETE FROM folders WHERE folder_id IN :folder_ids").bindparams(
+                    bindparam("folder_ids", expanding=True)
+                ),
+                {"folder_ids": folder_ids},
+            )
+
+        self._db.execute(
+            text("DELETE FROM workspace_join_requests WHERE workspace_id = :workspace_id"),
+            {"workspace_id": workspace_id},
+        )
+
+        self._db.execute(
+            text("DELETE FROM workspace_members WHERE workspace_id = :workspace_id"),
+            {"workspace_id": workspace_id},
+        )
+
         result = self._db.execute(
             text("DELETE FROM workspaces WHERE workspace_id = :workspace_id"),
             {"workspace_id": workspace_id},

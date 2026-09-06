@@ -35,23 +35,28 @@ class ObjectStorage(Protocol):
     def temporary_download_url(self, object_key: str) -> str: ...
 
 
-class CloudStorageService:
-    """Upload and remove private objects using Google Cloud Storage."""
+class S3StorageService:
+    """Upload and remove private objects using AWS S3."""
 
     def __init__(self, bucket_name: str | None = None) -> None:
-        self._bucket_name = bucket_name or settings.gcs_bucket_name
+        self._bucket_name = bucket_name or settings.s3_bucket_name
         self._client = None
 
     def upload(self, stream: BufferedIOBase, object_key: str, content_type: str | None) -> str:
         if not self._bucket_name:
             raise StorageNotConfiguredError("Private cloud storage is not configured")
         try:
-            from google.cloud import storage
+            import boto3
+            from botocore.exceptions import BotoCoreError, ClientError
 
             if self._client is None:
-                self._client = storage.Client()
-            blob = self._client.bucket(self._bucket_name).blob(object_key)
-            blob.upload_from_file(stream, rewind=False, content_type=content_type)
+                self._client = boto3.client("s3")
+            
+            extra_args = {}
+            if content_type:
+                extra_args["ContentType"] = content_type
+                
+            self._client.upload_fileobj(stream, self._bucket_name, object_key, ExtraArgs=extra_args)
             return object_key
         except StorageNotConfiguredError:
             raise
@@ -62,26 +67,32 @@ class CloudStorageService:
         if not self._bucket_name or self._client is None:
             return
         try:
-            self._client.bucket(self._bucket_name).blob(object_key).delete()
+            self._client.delete_object(Bucket=self._bucket_name, Key=object_key)
         except Exception as error:
             raise StorageUploadError("Cloud cleanup failed") from error
 
     def temporary_download_url(self, object_key: str) -> str:
-        """Create short-lived private GCS access without making the object public."""
+        """Create short-lived private S3 access without making the object public."""
         if not self._bucket_name:
             raise StorageNotConfiguredError("Private cloud storage is not configured")
         try:
-            from google.cloud import storage
+            import boto3
 
             if self._client is None:
-                self._client = storage.Client()
-            blob = self._client.bucket(self._bucket_name).blob(object_key)
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=timedelta(minutes=settings.gcs_signed_url_expire_minutes),
-                method="GET",
+                self._client = boto3.client("s3")
+            
+            return self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket_name, "Key": object_key},
+                ExpiresIn=settings.s3_signed_url_expire_minutes * 60,
             )
         except StorageNotConfiguredError:
             raise
         except Exception as error:
             raise StorageDownloadError("Temporary download access could not be created") from error
+
+
+def get_storage_service() -> ObjectStorage:
+    """FastAPI dependency providing the configured object-storage service."""
+    return S3StorageService()
+
