@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
@@ -43,6 +43,15 @@ def create_application() -> FastAPI:
     def root() -> dict[str, str]:
         """Provide a small discovery endpoint for the service."""
         return {"message": f"Welcome to {settings.app_name}"}
+
+    @application.middleware("http")
+    async def add_no_cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith(settings.api_v1_prefix):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
     return application
 
