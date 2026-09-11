@@ -61,7 +61,9 @@ class UserRepository:
 
     _USER_COLUMNS = """
         user_id, username, full_name, email, account_type, enrollment_id,
-        employee_id, profile_picture, bio, storage_used, storage_limit,
+        employee_id, profile_picture, bio, 
+        (SELECT COALESCE(SUM(storage_used), 0) FROM workspaces WHERE user_id = users.user_id) AS storage_used, 
+        storage_limit,
         email_verified, two_factor_enabled, account_status, created_at,
         updated_at, last_login
     """
