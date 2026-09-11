@@ -25,6 +25,7 @@ class FileShare:
     expires_at: datetime | None
     created_at: datetime | None
     file_name: str | None = None
+    workspace_name: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "FileShare":
@@ -40,6 +41,7 @@ class FileShare:
             expires_at=row["expires_at"],
             created_at=row["created_at"],
             file_name=_optional_string(row.get("file_name")),
+            workspace_name=_optional_string(row.get("workspace_name")),
         )
 
 
@@ -167,6 +169,29 @@ class ShareRepository:
             .first()
         )
         return FileShare.from_row(row) if row else None
+
+    def list_expiring_private_for_recipient(self, user_id: int) -> list[FileShare]:
+        """Return this recipient's private shares expiring within the next hour."""
+        rows = self._db.execute(
+            text(
+                """
+                SELECT fs.share_id, fs.file_id, fs.shared_by, fs.shared_with,
+                       fs.share_type, fs.permission, fs.share_link,
+                       fs.password_hash, fs.expires_at, fs.created_at,
+                       f.file_name, w.workspace_name
+                FROM file_shares AS fs
+                JOIN files AS f ON f.file_id = fs.file_id
+                JOIN folders AS fld ON fld.folder_id = f.folder_id
+                JOIN workspaces AS w ON w.workspace_id = fld.workspace_id
+                WHERE fs.share_type = 'PRIVATE' AND fs.shared_with = :user_id
+                  AND fs.expires_at > UTC_TIMESTAMP()
+                  AND fs.expires_at <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR)
+                ORDER BY fs.expires_at ASC, fs.share_id ASC
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().all()
+        return [FileShare.from_row(row) for row in rows]
 
     def update(self, share_id: int, changes: Mapping[str, Any]) -> bool:
         """Apply validated mutable share controls."""

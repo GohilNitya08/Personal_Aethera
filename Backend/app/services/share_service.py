@@ -14,6 +14,7 @@ from app.schemas.share import ShareCreateRequest, ShareUpdateRequest
 from app.services.auth_service import PASSWORD_CONTEXT, UserNotFoundError
 from app.services.file_service import FileNotFoundError, FilePermissionError, FileService
 from app.services.folder_service import FolderNotFoundError, FolderPermissionError, FolderService
+from app.services.notification_service import NotificationService
 from app.services.user_service import UserService
 from app.services.workspace_service import (
     WorkspaceNotFoundError,
@@ -52,12 +53,14 @@ class ShareService:
         folder_service: FolderService,
         workspace_service: WorkspaceService,
         user_service: UserService,
+        notification_service: NotificationService | None = None,
     ) -> None:
         self._repository = repository
         self._file_service = file_service
         self._folder_service = folder_service
         self._workspace_service = workspace_service
         self._user_service = user_service
+        self._notification_service = notification_service
 
     def create_share(self, actor_id: int, payload: ShareCreateRequest) -> FileShare:
         """Create a schema-compatible file share for an owner or administrator."""
@@ -86,6 +89,8 @@ class ShareService:
         }
         try:
             share_id = self._repository.create(values)
+            if payload.share_type == "PRIVATE" and payload.shared_with is not None:
+                self._notify_private_share(actor_id, payload.file_id, payload.shared_with, payload.permission)
             self._repository.commit()
         except IntegrityError as error:
             self._repository.rollback()
@@ -96,6 +101,18 @@ class ShareService:
         share = self._repository.get_by_id(share_id)
         if share is None:
             raise RuntimeError("Created share could not be loaded")
+        return share
+
+    def get_active_share_for_recipient(self, share_id: int, actor_id: int) -> FileShare:
+        """Validate a direct share before any future share-based access is issued."""
+        share = self._require_share(share_id)
+        if share.share_type != "PRIVATE" or share.shared_with != actor_id:
+            raise SharePermissionError
+        if share.expires_at is not None:
+            from datetime import datetime, timezone
+            expiry = share.expires_at if share.expires_at.tzinfo else share.expires_at.replace(tzinfo=timezone.utc)
+            if expiry <= datetime.now(timezone.utc):
+                raise ShareNotFoundError("Share has expired")
         return share
 
     def list_shares(self, actor_id: int) -> list[FileShare]:
@@ -235,6 +252,21 @@ class ShareService:
             self._user_service.get_user(user_id)
         except UserNotFoundError as error:
             raise ShareNotFoundError("Share recipient not found") from error
+
+    def _notify_private_share(self, actor_id: int, file_id: int, recipient_id: int, permission: str) -> None:
+        if self._notification_service is None:
+            return
+        file = self._file_service.get_file(file_id, actor_id)
+        folder = self._folder_service.get_folder(file.folder_id, actor_id)
+        workspace = self._workspace_service.get_workspace(folder.workspace_id, actor_id)
+        sender = self._user_service.get_user(actor_id)
+        self._notification_service.notify_private_share(
+            recipient_id=recipient_id,
+            sender_name=getattr(sender, "full_name", None) or getattr(sender, "username", "AETHERA user"),
+            file_name=file.file_name,
+            permission=permission,
+            workspace_name=workspace.workspace_name,
+        )
 
     def _new_share_link(self) -> str:
         for _ in range(5):

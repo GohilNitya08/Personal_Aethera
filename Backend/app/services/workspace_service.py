@@ -175,7 +175,9 @@ class WorkspaceService:
         self, workspace_id: int, actor_id: int, payload: WorkspaceInvitationRequest
     ) -> WorkspaceMember:
         """Add an active user as an immediate workspace member."""
-        _, actor_role = self._require_manager(workspace_id, actor_id)
+        _, actor_role = self._require_access(workspace_id, actor_id)
+        if actor_role not in {"OWNER", "ADMIN", "EDITOR"}:
+            raise WorkspacePermissionError
         if payload.role == "OWNER":
             raise WorkspaceConflictError("Use ownership transfer to assign the OWNER role")
         if actor_role != "OWNER" and payload.role == "ADMIN":
@@ -398,8 +400,6 @@ class WorkspaceService:
         membership = self._repository.get_membership(workspace.workspace_id, user_id)
         if membership is not None:
             return membership.role
-        if workspace.user_id == user_id:
-            return "OWNER"
         raise WorkspacePermissionError
 
     @staticmethod

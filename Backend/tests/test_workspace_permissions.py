@@ -523,3 +523,29 @@ def test_editor_can_update_folder_not_created_by_them() -> None:
 
     updated = folder_service.update_folder(20, 11, FolderUpdateRequest(folder_name="Updated folder"))
     assert updated.folder_name == "Updated folder"
+
+def test_viewer_is_strictly_denied_management() -> None:
+    workspace = _workspace(1, 10)
+    repo = DummyWorkspaceRepo(
+        {1: workspace},
+        {1: {
+            10: DummyWorkspaceMember(1, 1, 10, 'OWNER'),
+            11: DummyWorkspaceMember(2, 1, 11, 'VIEWER'),
+            12: DummyWorkspaceMember(3, 1, 12, 'EDITOR'),
+        }},
+    )
+    from app.schemas.workspace import WorkspaceUpdateRequest
+    from app.services.workspace_service import WorkspacePermissionError
+    workspace_service = WorkspaceService(repo, DummyUserRepo({10: object(), 11: object()}))
+
+    with pytest.raises(WorkspacePermissionError):
+        workspace_service.update_workspace(1, 11, WorkspaceUpdateRequest(workspace_name='Hack'))
+
+    with pytest.raises(WorkspacePermissionError):
+        workspace_service.delete_workspace(1, 11)
+
+    with pytest.raises(WorkspacePermissionError):
+        workspace_service.transfer_ownership(1, 11, 11)
+
+    with pytest.raises(WorkspacePermissionError):
+        workspace_service.remove_member(1, 11, 12)

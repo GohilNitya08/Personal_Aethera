@@ -143,7 +143,7 @@ class WorkspaceRepository:
         return Workspace.from_row(row) if row else None
 
     def list_for_user(self, user_id: int, *, include_archived: bool) -> list[Workspace]:
-        """Return workspaces owned by or shared with a user."""
+        """Return workspaces for which the user has an explicit membership."""
         archived_clause = "" if include_archived else " AND w.is_archived = FALSE"
         rows = (
             self._db.execute(
@@ -153,12 +153,11 @@ class WorkspaceRepository:
                            w.workspace_type, w.visibility, w.storage_used,
                            w.storage_limit, w.color, w.is_archived, w.created_at,
                            w.updated_at,
-                           COALESCE(wm.role, CASE WHEN w.user_id = :user_id THEN 'OWNER' END)
-                               AS member_role
+                           wm.role AS member_role
                     FROM workspaces AS w
-                    LEFT JOIN workspace_members AS wm
+                    JOIN workspace_members AS wm
                       ON wm.workspace_id = w.workspace_id AND wm.user_id = :user_id
-                    WHERE (w.user_id = :user_id OR wm.user_id IS NOT NULL){archived_clause}
+                    WHERE 1 = 1{archived_clause}
                     ORDER BY w.updated_at DESC, w.workspace_id DESC
                     """
                 ),
@@ -185,8 +184,7 @@ class WorkspaceRepository:
                            w.workspace_type, w.visibility, w.storage_used,
                            w.storage_limit, w.color, w.is_archived, w.created_at,
                            w.updated_at,
-                           COALESCE(wm.role, CASE WHEN w.user_id = :user_id THEN 'OWNER' END)
-                               AS member_role
+                           wm.role AS member_role
                     FROM workspaces AS w
                     LEFT JOIN workspace_members AS wm
                       ON wm.workspace_id = w.workspace_id AND wm.user_id = :user_id

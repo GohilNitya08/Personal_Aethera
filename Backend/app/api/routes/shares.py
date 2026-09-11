@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.files import get_file_service
 from app.api.routes.folders import get_folder_service
 from app.api.routes.users import get_current_auth_user, get_user_service
+from app.api.routes.notifications import get_notification_service
 from app.api.routes.workspaces import get_workspace_service
 from app.database.session import get_db
 from app.repositories.auth_repository import AuthUser
@@ -26,6 +27,7 @@ from app.services.share_service import (
 )
 from app.services.user_service import UserService
 from app.services.workspace_service import WorkspaceService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/shares", tags=["shares"])
 ShareId = Annotated[int, Path(gt=0)]
@@ -37,6 +39,7 @@ def get_share_service(
     folder_service: Annotated[FolderService, Depends(get_folder_service)],
     workspace_service: Annotated[WorkspaceService, Depends(get_workspace_service)],
     user_service: Annotated[UserService, Depends(get_user_service)],
+    notification_service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> ShareService:
     """Build a request-scoped sharing service from existing providers."""
     return ShareService(
@@ -45,6 +48,7 @@ def get_share_service(
         folder_service,
         workspace_service,
         user_service,
+        notification_service,
     )
 
 

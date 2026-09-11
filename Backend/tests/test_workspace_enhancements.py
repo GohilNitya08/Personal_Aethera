@@ -10,6 +10,11 @@ from app.repositories.workspace_repository import WorkspaceRepository
 from app.api.routes.files import _file_response, _version_response
 from app.schemas.file import FileUpdateRequest
 from app.schemas.folder import FolderCreateRequest, FolderUpdateRequest
+from app.schemas.workspace import (
+    WorkspaceInvitationRequest,
+    WorkspaceMemberUpdateRequest,
+    WorkspaceUpdateRequest,
+)
 from app.services.file_service import FilePermissionError, FileService
 from app.services.folder_service import FolderPermissionError, FolderService
 from app.services.join_request_service import JoinRequestService
@@ -293,4 +298,60 @@ def test_workspace_search_queries_id_and_name_without_access_filter():
     assert "CAST(w.workspace_id AS CHAR) LIKE :query" in sql
     assert "w.workspace_name LIKE :query" in sql
     assert "w.visibility = 'PUBLIC'" not in sql
+    assert "COALESCE" not in sql
+    assert "wm.role AS member_role" in sql
     assert db.params == {"user_id": 7, "query": "%42%"}
+
+
+def test_workspace_identity_and_role_are_scoped_to_exact_membership():
+    """Identically named workspaces must never share identity or owner privilege."""
+    first = Workspace(101, 1, workspace_name="SEM 5")
+    second = Workspace(202, 2, workspace_name="SEM 5")
+    repo = WorkspaceRepo(
+        {101: first, 202: second},
+        {
+            101: {1: Member(1, 101, 1, "OWNER"), 3: Member(3, 101, 3, "EDITOR")},
+            202: {2: Member(2, 202, 2, "OWNER"), 4: Member(4, 202, 4, "VIEWER")},
+        },
+    )
+    service = WorkspaceService(repo, UserRepo())
+
+    assert service.get_workspace(101, 1).member_role == "OWNER"
+    assert service.get_workspace(202, 2).member_role == "OWNER"
+    assert service.get_workspace(101, 3).member_role == "EDITOR"
+    assert service.get_workspace(202, 4).member_role == "VIEWER"
+    with pytest.raises(WorkspacePermissionError):
+        service.get_workspace(202, 1)
+    with pytest.raises(WorkspacePermissionError):
+        service.get_workspace(101, 2)
+
+
+def test_creator_without_membership_is_not_promoted_to_owner():
+    """The creator column is metadata; membership is the only role authority."""
+    repo = WorkspaceRepo({1: Workspace(1, 1)}, {1: {2: Member(2, 1, 2, "VIEWER")}})
+    service = WorkspaceService(repo, UserRepo())
+
+    with pytest.raises(WorkspacePermissionError):
+        service.get_workspace(1, 1)
+    with pytest.raises(WorkspacePermissionError):
+        service.update_workspace(1, 1, WorkspaceUpdateRequest(workspace_name="Nope"))
+    assert service.get_workspace(1, 2).member_role == "VIEWER"
+
+
+def test_editor_can_add_members_but_cannot_manage_members_or_settings():
+    repo = WorkspaceRepo(
+        {1: Workspace(1, 1)},
+        {1: {1: Member(1, 1, 1, "OWNER"), 3: Member(3, 1, 3, "EDITOR"), 4: Member(4, 1, 4, "VIEWER")}},
+    )
+    service = WorkspaceService(repo, UserRepo())
+
+    added = service.invite_member(1, 3, WorkspaceInvitationRequest(user_id=5, role="VIEWER"))
+    assert added.workspace_id == 1 and added.user_id == 5 and added.role == "VIEWER"
+    with pytest.raises(WorkspacePermissionError):
+        service.update_member(1, 3, 4, WorkspaceMemberUpdateRequest(role="EDITOR"))
+    with pytest.raises(WorkspacePermissionError):
+        service.remove_member(1, 3, 4)
+    with pytest.raises(WorkspacePermissionError):
+        service.update_workspace(1, 3, WorkspaceUpdateRequest(workspace_name="Nope"))
+    with pytest.raises(WorkspacePermissionError):
+        service.invite_member(1, 4, WorkspaceInvitationRequest(user_id=6, role="VIEWER"))

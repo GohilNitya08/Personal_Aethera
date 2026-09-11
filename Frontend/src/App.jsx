@@ -114,14 +114,18 @@ function Field({ label, onChange, ...props }) { return <label className="field">
 function Empty({ title, body, action }) { return <div className="empty"><div>◇</div><h3>{title}</h3><p>{body}</p>{action}</div>; }
 function ErrorState({ message, retry }) { return <div className="notice"><b>Couldn’t load this view.</b><br />{message} {retry && <button onClick={retry}>Try again</button>}</div>; }
 
-function AppShell({ page, setPage, onLogout, children, user }) { return <div className="app-shell"><aside><div className="brand"><span>✦</span> AETHERA</div><p className="workspace-label">WORKSPACE</p><nav>{navItems.map(([id, label]) => <button className={page === id ? 'active' : ''} onClick={() => setPage(id)} key={id}><span>{id === 'dashboard' ? '⌂' : id === 'workspaces' ? '▦' : id === 'search' ? '⚲' : id === 'shared' ? '↗' : '◎'}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><div>{user?.full_name?.slice(0, 1) || 'A'}</div><span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span></div><button className="logout" onClick={onLogout}>↪ Log out</button></div></aside><section className="main-area"><header><div><p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p><h2>{page === 'workspace' ? 'Workspace' : page === 'search' ? 'Search workspaces' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2></div><div className="top-status"><span></span> Secure session</div></header>{children}</section></div>; }
+function NotificationBellIcon() { return <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>; }
+function timeAgo(dateStr) { if (!dateStr) return ''; const s = (Date.now() - new Date(dateStr).getTime()) / 1000; if (s < 60) return 'Just now'; if (s < 3600) return `${Math.floor(s / 60)}m ago`; if (s < 86400) return `${Math.floor(s / 3600)}h ago`; if (s < 604800) return `${Math.floor(s / 86400)}d ago`; return formatDate(dateStr); }
+function AppShell({ page, setPage, onLogout, children, user }) { const notifications = useAsync(api.notifications, []); const [open, setOpen] = useState(false); const wrapRef = useRef(null); const inbox = notifications.data; const markRead = async (item) => { if (!item.is_read) { try { await api.markNotificationRead(item.notification_id); } catch (_) {} notifications.reload(); } }; const markAll = async () => { try { await api.markAllNotificationsRead(); } catch (_) {} notifications.reload(); };
+  useEffect(() => { if (!open) return undefined; const handler = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }; document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler); }, [open]);
+  return <div className="app-shell"><aside><div className="brand"><span>✦</span> AETHERA</div><p className="workspace-label">WORKSPACE</p><nav>{navItems.map(([id, label]) => <button className={page === id ? 'active' : ''} onClick={() => setPage(id)} key={id}><span>{id === 'dashboard' ? '⌂' : id === 'workspaces' ? '▦' : id === 'search' ? '⚲' : id === 'shared' ? '↗' : '◎'}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><div>{user?.full_name?.slice(0, 1) || 'A'}</div><span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span></div><button className="logout" onClick={onLogout}>↪ Log out</button></div></aside><section className="main-area"><header><div><p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p><h2>{page === 'workspace' ? 'Workspace' : page === 'search' ? 'Search workspaces' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2></div><div className="header-actions"><div className="notification-wrap" ref={wrapRef}><button className={`notification-button${open ? ' active' : ''}`} type="button" aria-label="Notifications" onClick={() => setOpen(!open)}><NotificationBellIcon />{inbox?.unread_count > 0 && <b>{inbox.unread_count > 9 ? '9+' : inbox.unread_count}</b>}</button>{open && <div className="notification-popover"><div className="notification-head"><strong>Notifications</strong>{inbox?.unread_count > 0 && <button className="text-button" onClick={markAll}>Mark all as read</button>}</div>{notifications.loading ? <p className="notification-empty muted">Loading…</p> : notifications.error ? <p className="notification-empty notification-error">⚠ Could not load notifications. <button className="text-button" onClick={notifications.reload}>Retry</button></p> : inbox?.notifications?.length ? <div className="notification-list">{inbox.notifications.map((item) => <button className={`notification-item${item.is_read ? '' : ' unread'}`} key={item.notification_id} onClick={() => markRead(item)}>{!item.is_read && <span className="unread-dot" />}<div className="notification-body"><strong>{item.title}</strong><span>{item.message}</span></div><time>{timeAgo(item.created_at)}</time></button>)}</div> : <div className="notification-empty"><span className="notification-empty-icon">🔔</span><p>You're all caught up</p><small className="muted">No notifications yet.</small></div>}</div>}</div><div className="top-status"><span></span> Secure session</div></div></header>{children}</section></div>; }
 
 function Dashboard({ go }) { const { data: workspaces, loading, error, reload } = useAsync(api.workspaces, []); const { data: shares } = useAsync(api.shares, []);
   if (error) return <ErrorState message={error} retry={reload} />;
   return <div className="page-content"><section className="hero"><div><p className="eyebrow">YOUR SPACE</p><h1>Good to see you.</h1><p>Pick up where you left off or create a new space for your next project.</p></div><button className="button primary" onClick={() => go('workspaces')}>Manage workspaces</button></section><section className="stat-grid"><Stat label="Workspaces" value={loading ? '—' : workspaces.length} /><Stat label="Shared with you" value={shares?.length ?? '—'} /><Stat label="Storage" value="Live data" detail="shown per workspace" /></section><section className="panel"><div className="panel-head"><div><h3>Recent workspaces</h3><p>Spaces you own or collaborate in.</p></div><button className="text-button" onClick={() => go('workspaces')}>View all</button></div>{loading ? <Loading /> : workspaces.length ? <div className="workspace-cards">{workspaces.slice(0, 3).map((workspace) => <WorkspaceCard key={workspace.workspace_id} workspace={workspace} open={() => go('workspace', workspace.workspace_id)} />)}</div> : <Empty title="No workspaces yet" body="Create your first workspace to organize folders and files." action={<button className="button primary" onClick={() => go('workspaces')}>Create workspace</button>} />}</section></div>; }
 function Stat({ label, value, detail }) { return <div className="stat"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>; }
 function Loading() { return <div className="loading">Loading real AETHERA data…</div>; }
-function WorkspaceCard({ workspace, open }) { return <button className="workspace-card" onClick={open}><span className={`color-dot ${workspace.color}`}></span><div><h4>{workspace.workspace_name}</h4><p>{workspace.description || 'No description yet'}</p></div><small>{workspace.member_role || 'OWNER'} · {workspace.visibility}</small></button>; }
+function WorkspaceCard({ workspace, open }) { return <button className="workspace-card" onClick={open}><span className={`color-dot ${workspace.color}`}></span><div><h4>{workspace.workspace_name}</h4><p>{workspace.description || 'No description yet'}</p></div><small>{workspace.member_role || 'NO MEMBER ROLE'} · {workspace.visibility}</small></button>; }
 
 function Workspaces({ open }) { const { data, loading, error, reload } = useAsync(api.workspaces, []); const [showForm, setShowForm] = useState(false); const [form, setForm] = useState({ workspace_name: '', workspace_type: 'PERSONAL', description: '', visibility: 'PRIVATE', color: 'blue' }); const [message, setMessage] = useState('');
   const create = async (e) => { e.preventDefault(); setMessage(''); try { const workspace = await api.createWorkspace(form); setShowForm(false); open('workspace', workspace.workspace_id); } catch (err) { setMessage(err.message); } };
@@ -135,6 +139,8 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
   const [notice, setNotice] = useState('');
   const [pendingDeleteFolder, setPendingDeleteFolder] = useState(null);
   const [busyFolderDelete, setBusyFolderDelete] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
 
   const canDeleteFolder = (fld) => {
     if (workspace?.member_role === 'OWNER' || workspace?.member_role === 'ADMIN') return true;
@@ -176,14 +182,42 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
       <section className="workspace-header">
         <span className={`big-dot ${workspace.color}`}></span>
         <div>
-          <p className="eyebrow">{workspace.workspace_type} · {workspace.visibility} · {workspace.member_role || 'MEMBER'}</p>
+          <p className="eyebrow">{workspace.workspace_type} · {workspace.visibility} · {workspace.member_role || 'READ-ONLY'}</p>
           <h1>{workspace.workspace_name}</h1>
           <p>{workspace.description || 'No description provided.'}</p>
         </div>
-        <div className="storage"><span>Storage</span><strong>{formatBytes(workspace.storage_used)} <small>of {workspace.storage_limit ? formatBytes(workspace.storage_limit) : 'unlimited'}</small></strong></div>
+        <div className="storage">
+          <span>Storage</span>
+          <strong>{formatBytes(workspace.storage_used)} <small>of {workspace.storage_limit ? formatBytes(workspace.storage_limit) : 'unlimited'}</small></strong>
+        </div>
+        <div className="page-actions" style={{ marginLeft: 'auto' }}>
+          {['OWNER', 'ADMIN'].includes(workspace.member_role) && (
+            <button className="button secondary" onClick={() => { setShowSettings(true); setShowMembers(false); }}>
+              Edit Workspace
+            </button>
+          )}
+          {['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role) && (
+            <button className="button secondary" onClick={() => { setShowMembers(true); setShowSettings(false); }}>
+              Manage Members
+            </button>
+          )}
+        </div>
       </section>
-      <section className="panel">
-        <div className="panel-head"><div><h3>Folders</h3><p>Open a folder to view its actual files.</p></div></div>
+
+      {showSettings && ['OWNER', 'ADMIN'].includes(workspace.member_role) && (
+        <WorkspaceSettings workspace={workspace} reload={reload} goBack={back} onClose={() => setShowSettings(false)} />
+      )}
+
+      {showMembers && ['OWNER', 'ADMIN', 'EDITOR'].includes(workspace.member_role) && (
+        <>
+          <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} onClose={() => setShowMembers(false)} />
+          {workspace.member_role === 'OWNER' && <JoinRequestsPanel workspaceId={workspaceId} onMembersChanged={() => membersState.reload()} />}
+        </>
+      )}
+
+      {(!showSettings && !showMembers) && (
+        <section className="panel">
+          <div className="panel-head"><div><h3>Folders</h3><p>Open a folder to view its actual files.</p></div></div>
         {canWrite && <form className="compact-form" onSubmit={createFolder}>
           <input placeholder="New folder name" value={folderName} onChange={(e) => setFolderName(e.target.value)} required />
           <button className="button secondary">Add folder</button>
@@ -239,7 +273,8 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
           ))}</div>
         ) : <Empty title="This workspace is empty" body="Create a folder to begin organizing files." />}
       </section>
-      {pendingDeleteFolder && (
+      )}
+      {(!showSettings && !showMembers) && pendingDeleteFolder && (
         <ConfirmDialog
           title={`Delete "${pendingDeleteFolder.folder_name}"?`}
           body="This folder and its contents will be deleted. Are you sure you want to proceed?"
@@ -249,9 +284,6 @@ function WorkspaceDetail({ workspaceId, back, go, currentUser }) {
           onConfirm={confirmDeleteFolder}
         />
       )}
-      {workspace.member_role && <WorkspaceMembers workspaceId={workspaceId} workspace={workspace} currentUser={currentUser} membersState={membersState} onWorkspaceChanged={reload} />}
-      {workspace.member_role === 'OWNER' && <JoinRequestsPanel workspaceId={workspaceId} onMembersChanged={() => membersState.reload()} />}
-      <WorkspaceSettings workspace={workspace} reload={reload} goBack={back} />
     </div>
   );
 }
@@ -274,7 +306,7 @@ function JoinRequestsPanel({ workspaceId, onMembersChanged }) {
   return <section className="panel"><div className="panel-head"><div><h3>Join Requests</h3><p>Users waiting to access this workspace.</p></div>{selected.size > 0 && <button className="button primary" disabled={busy} onClick={approveBulk}>Approve Selected</button>}</div><div className="file-table"><div className="table-head" style={{ gridTemplateColumns: 'auto 1fr auto auto' }}><input type="checkbox" checked={selected.size === data.length} onChange={toggleAll} /><span>User ID</span><span>Status</span><span></span></div>{data.map(req => <div className="file-row" key={req.request_id} style={{ gridTemplateColumns: 'auto 1fr auto auto' }}><input type="checkbox" checked={selected.has(req.request_id)} onChange={() => toggleOne(req.request_id)} /><span>User #{req.user_id}</span><span>{req.status}</span><div className="member-actions"><button className="text-button" disabled={busy} onClick={() => approve(req.request_id)}>Approve</button><button className="text-button danger" disabled={busy} onClick={() => reject(req.request_id)}>Reject</button></div></div>)}</div></section>;
 }
 
-function WorkspaceSettings({ workspace, reload, goBack }) {
+function WorkspaceSettings({ workspace, reload, goBack, onClose }) {
   const [form, setForm] = useState({ workspace_name: workspace.workspace_name, visibility: workspace.visibility });
   const [busy, setBusy] = useState(false); const [pendingDelete, setPendingDelete] = useState(false);
   const save = async (e) => { e.preventDefault(); setBusy(true); try { await api.updateWorkspace(workspace.workspace_id, form); await reload(); } catch (e) { alert(e.message); } finally { setBusy(false); } };
@@ -282,7 +314,13 @@ function WorkspaceSettings({ workspace, reload, goBack }) {
   if (workspace.member_role !== 'OWNER' && workspace.member_role !== 'ADMIN') return null;
   return (
     <section className="panel">
-      <div className="panel-head"><div><h3>Workspace Settings</h3></div></div>
+      <div className="panel-head">
+        <div>
+          <h3>Workspace Settings</h3>
+          <p className="eyebrow" style={{ marginTop: 4 }}>ID: {workspace.workspace_id} <button className="text-button" type="button" onClick={() => { navigator.clipboard.writeText(workspace.workspace_id); alert('Copied ID'); }}>Copy</button></p>
+        </div>
+        {onClose && <button className="text-button" onClick={onClose}>Close</button>}
+      </div>
       <form className="inline-form" onSubmit={save}>
         <Field label="Name" value={form.workspace_name} onChange={v => setForm({...form, workspace_name: v})} required />
         <label className="field">
@@ -337,11 +375,12 @@ function sameUserId(left, right) {
   return Number.isInteger(a) && a > 0 && a === b;
 }
 
-function isWorkspaceOwnerMember(member, workspace) {
-  return member.role === 'OWNER' || sameUserId(member.user_id, workspace?.user_id);
+function isWorkspaceOwnerMember(member) {
+  return member.role === 'OWNER';
 }
 
 function canManageMembers(role) { return role === 'OWNER' || role === 'ADMIN'; }
+function canAddMembers(role) { return ['OWNER', 'ADMIN', 'EDITOR'].includes(role); }
 
 function roleOptionsForChange(actorRole, member, currentUserId) {
   if (!canManageMembers(actorRole) || member.role === 'OWNER' || member.user_id === currentUserId) return [];
@@ -373,7 +412,7 @@ function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel, busy })
   );
 }
 
-function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, onWorkspaceChanged }) {
+function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, onWorkspaceChanged, onClose }) {
   const actorRole = workspace.member_role;
   const members = membersState.data || [];
   const memberIds = members.map((member) => member.user_id);
@@ -486,7 +525,7 @@ function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, o
     }
   };
 
-  const transferCandidates = members.filter((member) => !isWorkspaceOwnerMember(member, workspace));
+  const transferCandidates = members.filter((member) => !isWorkspaceOwnerMember(member));
   const selectedTransfer = transferCandidates.find((member) => sameUserId(member.user_id, transferId));
 
   return (
@@ -494,11 +533,13 @@ function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, o
       <div className="panel-head">
         <div>
           <h3>Members</h3>
+          <p className="eyebrow" style={{ marginTop: 4 }}>Workspace ID: {workspaceId} <button className="text-button" type="button" onClick={() => { navigator.clipboard.writeText(workspaceId); showNotice('Copied ID', 'success'); }}>Copy</button></p>
           <p>People who can access this workspace, and the role assigned to each of them.</p>
         </div>
+        {onClose && <button className="text-button" onClick={onClose}>Close</button>}
       </div>
       {notice.text && <div className={`notice ${notice.tone}`}>{notice.text}</div>}
-      {canManageMembers(actorRole) && (
+      {canAddMembers(actorRole) && (
         <form className="inline-form" onSubmit={invite}>
           <Field label="Search AETHERA users" value={query} onChange={runSearch} placeholder="Search by name or username" />
           <label className="field">
