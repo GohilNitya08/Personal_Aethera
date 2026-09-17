@@ -86,6 +86,7 @@ export const api = {
   updateWorkspace: (id, payload) => request(`/workspaces/${id}`, json('PUT', payload)),
   deleteWorkspace: (id) => request(`/workspaces/${id}`, { method: 'DELETE' }),
   searchWorkspaces: (query) => request(`/workspaces/search?query=${encodeURIComponent(query)}`),
+  search: (q) => request(`/search?q=${encodeURIComponent(q)}`),
   requestJoinWorkspace: (workspaceId) => request('/join-requests', json('POST', { workspace_id: workspaceId })),
   getJoinRequests: (workspaceId) => request(`/join-requests/workspaces/${workspaceId}?status=PENDING`),
   approveJoinRequest: (requestId) => request(`/join-requests/${requestId}/approve`, { method: 'POST' }),

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authStore, API_BASE_URL } from './services/api';
 
-const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['search', 'Search workspaces'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
+const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['search', 'Search'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
 const formatBytes = (bytes = 0) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const formatDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : '—';
 
@@ -864,14 +864,49 @@ function Profile({ onUserChange }) { const state = useAsync(api.me, []); const [
   if (state.error) return <ErrorState message={state.error} retry={state.reload} />; if (state.loading || !form) return <Loading />; const user = state.data;
   return <div className="page-content profile"><section className="profile-card"><div className="avatar">{user.full_name.slice(0, 1)}</div><div><h3>{user.full_name}</h3><p>@{user.username} · {user.account_type}</p><p className="muted">{user.email}</p></div><button className="button secondary" onClick={() => setEditing(!editing)}>{editing ? 'Cancel' : 'Edit profile'}</button></section>{message && <div className="notice success">{message}</div>}{editing && <form className="inline-form" onSubmit={save}><Field label="Full name" value={form.full_name} onChange={(full_name) => setForm({ ...form, full_name })} required /><Field label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} required /><Field label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} required /><label className="field"><span>Bio</span><textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} /></label><button className="button primary">Save changes</button></form>}<section className="stat-grid"><Stat label="Storage used" value={formatBytes(user.storage_used)} /><Stat label="Storage limit" value={user.storage_limit ? formatBytes(user.storage_limit) : 'Unlimited'} /><Stat label="Email" value={user.email_verified ? 'Verified' : 'Unverified'} /></section></div>; }
 
-function WorkspaceSearch({ go }) { const [query, setQuery] = useState(''); const [results, setResults] = useState([]); const [loading, setLoading] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState({ text: '', tone: '' });
-  const search = async (e) => { e.preventDefault(); if (!query.trim()) return; setLoading(true); setError(''); setNotice({ text: '', tone: '' }); try { setResults(await api.searchWorkspaces(query)); } catch (err) { setError(err.message); } finally { setLoading(false); } };
-  const requestJoin = async (id) => { setNotice({ text: '', tone: '' }); try { await api.requestJoinWorkspace(id); setNotice({ text: 'Join request sent successfully.', tone: 'success' }); } catch (err) { setNotice({ text: err.message, tone: '' }); } };
-  return <div className="page-content"><section className="panel"><div className="panel-head"><div><h3>Search workspaces</h3><p>Find workspaces by ID or name. Public workspaces open read-only; private workspaces require approval.</p></div></div><form className="compact-form" onSubmit={search}><input placeholder="Workspace ID or name..." value={query} onChange={(e) => setQuery(e.target.value)} required /><button className="button primary" disabled={loading}>{loading ? 'Searching...' : 'Search'}</button></form>{notice.text && <div className={`notice ${notice.tone === 'success' ? 'success' : ''}`}>{notice.text}</div>}{error && <ErrorState message={error} />}{!loading && !error && results.length > 0 && <div className="file-table"><div className="table-head"><span>Name</span><span>ID</span><span>Owner</span><span>Visibility</span><span></span></div>{results.map((ws) => <div className="file-row" key={ws.workspace_id}><span><b>▦</b> {ws.workspace_name}</span><span>#{ws.workspace_id}</span><span>User #{ws.user_id}</span><span><span className={`badge ${ws.visibility.toLowerCase()}`}>{ws.visibility}</span></span><div className="member-actions">{ws.member_role || ws.visibility === 'PUBLIC' ? <button type="button" className="text-button" onClick={() => go('workspace', ws.workspace_id)}>Open</button> : <button type="button" className="text-button" onClick={() => requestJoin(ws.workspace_id)}>Request to Join</button>}</div></div>)}</div>}{!loading && !error && results.length === 0 && query && <Empty title="No results" body="Try a different search term." />}</section></div>; }
+function UnifiedSearch({ go }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [searched, setSearched] = useState(false);
+  
+  const search = async (e) => { 
+    e.preventDefault(); 
+    const q = query.trim(); 
+    if (!q) return; 
+    setLoading(true); 
+    setError(''); 
+    setSearched(true); 
+    try { setResults(await api.search(q)); } 
+    catch (err) { setError(err.message); } 
+    finally { setLoading(false); } 
+  };
+  
+  const clear = () => { setQuery(''); setResults(null); setSearched(false); setError(''); };
+  
+  const totalResults = results ? (results.workspaces?.length || 0) + (results.folders?.length || 0) + (results.shared_files?.length || 0) : 0;
+  
+  const openFolder = async (folderId, workspaceId, workspaceName) => { 
+    try { 
+      const workspace = await api.workspace(workspaceId); 
+      go('folder', folderId, workspace); 
+    } catch (_) { 
+      go('workspace', workspaceId); 
+    } 
+  };
+  
+  const requestJoin = async (id) => { 
+    try { await api.requestJoinWorkspace(id); alert('Join request sent successfully.'); } 
+    catch (err) { alert(err.message); } 
+  };
+
+  return <div className="page-content"><section className="panel"><div className="panel-head"><div><h3>Search</h3><p>Find workspaces, folders, and shared items across AETHERA.</p></div></div><form className="compact-form" onSubmit={search}><input placeholder="Search workspaces, folders…" value={query} onChange={(e) => setQuery(e.target.value)} required />{query && <button type="button" className="text-button" style={{marginRight: '10px'}} onClick={clear}>Clear</button>}<button className="button primary" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button></form>{error && <ErrorState message={error} />}{loading && <Loading />}{!loading && !error && searched && totalResults === 0 && <Empty title="No results found" body={`Nothing matched "${results?.query || query}". Try a different keyword.`} />}{!loading && !error && results && totalResults > 0 && <div className="search-results"><p style={{fontSize: '13px', color: '#71817b', marginBottom: '15px'}}>{totalResults} result{totalResults !== 1 ? 's' : ''}</p>{results.workspaces?.length > 0 && <div className="search-category"><h4>Workspaces</h4>{results.workspaces.map((ws) => <div className="file-row" key={`ws-${ws.workspace_id}`} style={{cursor: 'pointer'}} onClick={() => ws.member_role || ws.visibility === 'PUBLIC' ? go('workspace', ws.workspace_id) : requestJoin(ws.workspace_id)}><span><b>▦</b> {ws.workspace_name}</span><span><span className={`badge ${ws.visibility.toLowerCase()}`}>{ws.visibility}</span> <span className="badge">{ws.workspace_type}</span></span></div>)}</div>}{results.folders?.length > 0 && <div className="search-category"><h4 style={{marginTop: '20px'}}>Folders</h4>{results.folders.map((fo) => <div className="file-row" key={`fo-${fo.folder_id}`} style={{cursor: 'pointer'}} onClick={() => openFolder(fo.folder_id, fo.workspace_id, fo.workspace_name)}><span><b>▤</b> {fo.folder_name}</span><span style={{color: '#71817b', fontSize: '13px'}}>{fo.workspace_name}</span></div>)}</div>}{results.shared_files?.length > 0 && <div className="search-category"><h4 style={{marginTop: '20px'}}>Shared with you</h4>{results.shared_files.map((s) => <div className="file-row" key={`sh-${s.share_id}`} style={{cursor: 'pointer'}} onClick={() => go('shared')}><span><b>↗</b> {s.file_name}</span><span style={{color: '#71817b', fontSize: '13px'}}>{s.workspace_name || 'Shared file'}</span></div>)}</div>}</div>}</section></div>;
+}
 
 export default function App() { const [authenticated, setAuthenticated] = useState(Boolean(authStore.token)); const [page, setPage] = useState('dashboard'); const [params, setParams] = useState({}); const [user, setUser] = useState(null); const [oauthError, setOauthError] = useState(''); const googleHandoffStarted = useRef(false); const me = useAsync(() => authenticated ? api.me() : Promise.resolve(null), [authenticated]); useEffect(() => { if (me.data) setUser(me.data); }, [me.data]); useEffect(() => { const handler = () => setAuthenticated(false); window.addEventListener('aethera:unauthorized', handler); return () => window.removeEventListener('aethera:unauthorized', handler); }, []); useEffect(() => { const handoffCode = new URLSearchParams(window.location.search).get('oauth_code'); if (!handoffCode || googleHandoffStarted.current) return; googleHandoffStarted.current = true; api.exchangeGoogleOAuthCode(handoffCode).then((tokens) => { authStore.set(tokens); setAuthenticated(true); }).catch((error) => setOauthError(error.message || 'Google sign-in could not be completed.')).finally(() => window.history.replaceState({}, document.title, window.location.pathname)); }, []);
   const go = (next, id, workspace) => { setPage(next); setParams({ id, workspace }); }; const logout = async () => { try { await api.logout(); } catch (_) {} authStore.clear(); setAuthenticated(false); setPage('dashboard'); };
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} oauthError={oauthError} />;
-  let content = page === 'dashboard' ? <Dashboard go={go} user={user} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <WorkspaceSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} currentUser={user} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
+  let content = page === 'dashboard' ? <Dashboard go={go} user={user} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <UnifiedSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} currentUser={user} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
   return <AppShell page={page} setPage={setPage} onLogout={logout} user={user}>{content}</AppShell>;
 }
