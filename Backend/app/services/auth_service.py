@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -245,6 +249,19 @@ class AuthService:
                 },
                 timeout=10.0,
             )
+            # --- TEMPORARY DIAGNOSTIC (remove after debugging) ---
+            if not response.is_success:
+                try:
+                    err_body = response.json()
+                except Exception:
+                    err_body = {}
+                _logger.error(
+                    "Google token exchange failed: HTTP %s | error=%s | error_description=%s",
+                    response.status_code,
+                    err_body.get("error", "<none>"),
+                    err_body.get("error_description", "<none>"),
+                )
+            # --- END TEMPORARY DIAGNOSTIC ---
             response.raise_for_status()
             token_data: dict[str, Any] = response.json()
             raw_id_token = token_data.get("id_token")
@@ -258,9 +275,11 @@ class AuthService:
         except GoogleOAuthError:
             raise
         except (httpx.HTTPError, ValueError) as error:
+            _logger.error("Google OAuth HTTP/parse error: %s", error)
             raise GoogleOAuthError("Google authentication failed") from error
         except Exception as error:
             # google-auth raises several implementation-specific token errors.
+            _logger.error("Google ID token verification error: %s", error)
             raise GoogleOAuthError("Google identity token verification failed") from error
 
         subject = claims.get("sub")

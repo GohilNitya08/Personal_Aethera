@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     password_reset_otp_max_attempts: int = Field(default=5, gt=0, le=20)
     otp_resend_cooldown_seconds: int = Field(default=60, gt=0, le=300)
 
+    # Amazon Bedrock AI (Talk with Document)
+    bedrock_model_id: str = "eu.amazon.nova-2-lite-v1:0"
+    bedrock_region: str = "eu-north-1"
+    bedrock_max_context_chars: int = Field(default=80000, gt=1000)
+    bedrock_max_response_tokens: int = Field(default=2048, gt=100, le=8192)
+
     jwt_secret_key: str = DEVELOPMENT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = Field(default=30, gt=0)

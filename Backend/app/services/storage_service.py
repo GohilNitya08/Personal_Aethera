@@ -91,6 +91,23 @@ class S3StorageService:
         except Exception as error:
             raise StorageDownloadError("Temporary download access could not be created") from error
 
+    def download_bytes(self, object_key: str) -> bytes:
+        """Download a private object's full content as bytes."""
+        if not self._bucket_name:
+            raise StorageNotConfiguredError("Private cloud storage is not configured")
+        try:
+            import boto3
+
+            if self._client is None:
+                self._client = boto3.client("s3")
+
+            response = self._client.get_object(Bucket=self._bucket_name, Key=object_key)
+            return response["Body"].read()
+        except StorageNotConfiguredError:
+            raise
+        except Exception as error:
+            raise StorageDownloadError("Could not download object content") from error
+
 
 def get_storage_service() -> ObjectStorage:
     """FastAPI dependency providing the configured object-storage service."""

@@ -12,6 +12,7 @@ from app.api.routes.workspaces import router as workspaces_router
 from app.api.routes.notifications import router as notifications_router
 from app.api.routes.join_requests import router as join_requests_router
 from app.api.routes.search import router as search_router
+from app.api.routes.ai import router as ai_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -24,3 +25,4 @@ api_router.include_router(workspaces_router)
 api_router.include_router(notifications_router)
 api_router.include_router(join_requests_router)
 api_router.include_router(search_router)
+api_router.include_router(ai_router)

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, authStore, API_BASE_URL } from './services/api';
 
-const navItems = [['dashboard', 'Dashboard'], ['workspaces', 'Workspaces'], ['search', 'Search'], ['shared', 'Shared files'], ['profile', 'Profile & settings']];
 const formatBytes = (bytes = 0) => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const formatDate = (value) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : '—';
 
@@ -116,13 +115,262 @@ function ErrorState({ message, retry }) { return <div className="notice"><b>Coul
 
 function NotificationBellIcon() { return <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>; }
 function timeAgo(dateStr) { if (!dateStr) return ''; const s = (Date.now() - new Date(dateStr).getTime()) / 1000; if (s < 60) return 'Just now'; if (s < 3600) return `${Math.floor(s / 60)}m ago`; if (s < 86400) return `${Math.floor(s / 3600)}h ago`; if (s < 604800) return `${Math.floor(s / 86400)}d ago`; return formatDate(dateStr); }
-function AppShell({ page, setPage, onLogout, children, user }) { const notifications = useAsync(api.notifications, []); const [open, setOpen] = useState(false); const wrapRef = useRef(null); const inbox = notifications.data; const markRead = async (item) => { if (!item.is_read) { try { await api.markNotificationRead(item.notification_id); } catch (_) {} notifications.reload(); } }; const markAll = async () => { try { await api.markAllNotificationsRead(); } catch (_) {} notifications.reload(); };
+function AppShell({ page, setPage, onLogout, children, user }) { 
+  const [theme, setTheme] = useState(() => localStorage.getItem('aethera_theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('aethera_theme', theme);
+  }, [theme]);
+  const notifications = useAsync(api.notifications, []); 
+  const [open, setOpen] = useState(false); 
+  const wrapRef = useRef(null); 
+  const inbox = notifications.data; 
+  const markRead = async (item) => { if (!item.is_read) { try { await api.markNotificationRead(item.notification_id); } catch (_) {} notifications.reload(); } }; 
+  const markAll = async () => { try { await api.markAllNotificationsRead(); } catch (_) {} notifications.reload(); };
   useEffect(() => { if (!open) return undefined; const handler = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }; document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler); }, [open]);
-  return <div className="app-shell"><aside><div className="brand"><span>✦</span> AETHERA</div><p className="workspace-label">WORKSPACE</p><nav>{navItems.map(([id, label]) => <button className={page === id ? 'active' : ''} onClick={() => setPage(id)} key={id}><span>{id === 'dashboard' ? '⌂' : id === 'workspaces' ? '▦' : id === 'search' ? '⚲' : id === 'shared' ? '↗' : '◎'}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div className="user-chip"><div>{user?.full_name?.slice(0, 1) || 'A'}</div><span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span></div><button className="logout" onClick={onLogout}>↪ Log out</button></div></aside><section className="main-area"><header><div><p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p><h2>{page === 'workspace' ? 'Workspace' : page === 'search' ? 'Search workspaces' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2></div><div className="header-actions"><div className="notification-wrap" ref={wrapRef}><button className={`notification-button${open ? ' active' : ''}`} type="button" aria-label="Notifications" onClick={() => setOpen(!open)}><NotificationBellIcon />{inbox?.unread_count > 0 && <b>{inbox.unread_count > 9 ? '9+' : inbox.unread_count}</b>}</button>{open && <div className="notification-popover"><div className="notification-head"><strong>Notifications</strong>{inbox?.unread_count > 0 && <button className="text-button" onClick={markAll}>Mark all as read</button>}</div>{notifications.loading ? <p className="notification-empty muted">Loading…</p> : notifications.error ? <p className="notification-empty notification-error">⚠ Could not load notifications. <button className="text-button" onClick={notifications.reload}>Retry</button></p> : inbox?.notifications?.length ? <div className="notification-list">{inbox.notifications.map((item) => <button className={`notification-item${item.is_read ? '' : ' unread'}`} key={item.notification_id} onClick={() => markRead(item)}>{!item.is_read && <span className="unread-dot" />}<div className="notification-body"><strong>{item.title}</strong><span>{item.message}</span></div><time>{timeAgo(item.created_at)}</time></button>)}</div> : <div className="notification-empty"><span className="notification-empty-icon">🔔</span><p>You're all caught up</p><small className="muted">No notifications yet.</small></div>}</div>}</div><div className="top-status"><span></span> Secure session</div></div></header>{children}</section></div>; }
+  
+  const used = user?.storage_used ?? 0;
+  const limit = user?.storage_limit ?? 0;
+  const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
 
-function Dashboard({ go, user }) { const { data: workspaces, loading, error, reload } = useAsync(api.workspaces, []); const { data: shares } = useAsync(api.shares, []);
+  return (
+    <div className="app-shell">
+      <aside className="app-sidebar">
+        <div className="brand"><span>✦</span> AETHERA</div>
+        <p className="brand-tagline">Cloud intelligence & storage</p>
+        
+        <nav>
+          <p className="nav-group-label">MAIN</p>
+          <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}><span>⌂</span>Dashboard</button>
+          <button className={page === 'workspaces' || page === 'workspace' || page === 'folder' ? 'active' : ''} onClick={() => setPage('workspaces')}><span>▦</span>Workspaces</button>
+          
+          <p className="nav-group-label">COLLABORATION</p>
+          <button className={page === 'shared' ? 'active' : ''} onClick={() => setPage('shared')}><span>↗</span>Shared files</button>
+          
+          <p className="nav-group-label">DISCOVER</p>
+          <button className={page === 'search' ? 'active' : ''} onClick={() => setPage('search')}><span>⚲</span>Search</button>
+          
+          <p className="nav-group-label">SYSTEM</p>
+          <button className={page === 'notifications' ? 'active' : ''} onClick={() => setPage('notifications')}>
+            <span>◎</span>Notifications
+            {inbox?.unread_count > 0 && <span className="nav-badge">{inbox.unread_count > 9 ? '9+' : inbox.unread_count}</span>}
+          </button>
+          <button className={page === 'profile' ? 'active' : ''} onClick={() => setPage('profile')}><span>👤</span>Profile & settings</button>
+        </nav>
+
+        <p className="sidebar-tagline">Your work,<span>calmly organized.</span></p>
+
+        <div className="sidebar-bottom">
+          <div className="sidebar-storage">
+            <div className="sidebar-storage-label"><span>Storage</span><span>{pct < 0.1 && used > 0 ? '<0.1' : pct.toFixed(0)}%</span></div>
+            <div className="sidebar-storage-bar"><div className="sidebar-storage-fill" style={{width: `${pct}%`}}></div></div>
+            <span className="sidebar-storage-text">{formatBytes(used)} of {limit ? formatBytes(limit) : 'Unlimited'}</span>
+          </div>
+          <div className="user-chip">
+            <div>{user?.full_name?.slice(0, 1) || 'A'}</div>
+            <span>{user?.full_name || 'Loading…'}<small>{user?.email || ''}</small></span>
+          </div>
+          <button className="logout" onClick={onLogout}>↪ Log out</button>
+        </div>
+      </aside>
+      <section className="main-area">
+        <header>
+          <div>
+            <p className="eyebrow">AETHERA / {page.replace('-', ' ').toUpperCase()}</p>
+            <h2>{page === 'workspace' ? 'Workspace' : page === 'folder' ? 'Folder' : page === 'search' ? 'Search workspaces' : page === 'shared' ? 'Shared files' : page === 'profile' ? 'Profile & settings' : page[0].toUpperCase() + page.slice(1)}</h2>
+          </div>
+          <div className="header-actions">
+            <button className="theme-toggle notification-button" type="button" aria-label="Toggle theme" onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')} style={{ fontSize: '18px' }}>
+              {theme === 'light' ? '☾' : '☀'}
+            </button>
+            <div className="notification-wrap" ref={wrapRef}>
+              <button className={`notification-button${open ? ' active' : ''}`} type="button" aria-label="Notifications" onClick={() => setOpen(!open)}><NotificationBellIcon />{inbox?.unread_count > 0 && <b>{inbox.unread_count > 9 ? '9+' : inbox.unread_count}</b>}</button>
+              {open && <div className="notification-popover"><div className="notification-head"><strong>Notifications</strong>{inbox?.unread_count > 0 && <button className="text-button" onClick={markAll}>Mark all as read</button>}</div>{notifications.loading ? <p className="notification-empty muted">Loading…</p> : notifications.error ? <p className="notification-empty notification-error">⚠ Could not load notifications. <button className="text-button" onClick={notifications.reload}>Retry</button></p> : inbox?.notifications?.length ? <div className="notification-list">{inbox.notifications.map((item) => <button className={`notification-item${item.is_read ? '' : ' unread'}`} key={item.notification_id} onClick={() => markRead(item)}>{!item.is_read && <span className="unread-dot" />}<div className="notification-body"><strong>{item.title}</strong><span>{item.message}</span></div><time>{timeAgo(item.created_at)}</time></button>)}</div> : <div className="notification-empty"><span className="notification-empty-icon">🔔</span><p>You're all caught up</p><small className="muted">No notifications yet.</small></div>}</div>}
+            </div>
+            <div className="top-status"><span></span> Secure session</div>
+          </div>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function Dashboard({ go, user }) {
+  const { data: workspaces, loading, error, reload } = useAsync(api.workspaces, []);
+  const { data: shares } = useAsync(api.shares, []);
+  const [recentFiles, setRecentFiles] = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(true);
+
+  useEffect(() => {
+    if (!workspaces || workspaces.length === 0) {
+      setLoadingFiles(false);
+      return;
+    }
+    async function fetchRecent() {
+      try {
+        let files = [];
+        const topWs = workspaces.slice(0, 3);
+        for (const ws of topWs) {
+          const folders = await api.folders(ws.workspace_id).catch(() => []);
+          for (const f of folders.slice(0, 2)) {
+            const fFiles = await api.files(f.folder_id).catch(() => []);
+            files = files.concat(fFiles.map(file => ({...file, workspace_name: ws.workspace_name, folder_name: f.folder_name, workspace: ws, folder: f})));
+          }
+        }
+        files.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        setRecentFiles(files.slice(0, 5));
+      } catch (e) {
+      } finally {
+        setLoadingFiles(false);
+      }
+    }
+    fetchRecent();
+  }, [workspaces]);
+
   if (error) return <ErrorState message={error} retry={reload} />;
-  return <div className="page-content"><section className="hero"><div><p className="eyebrow">YOUR SPACE</p><h1>Good to see you.</h1><p>Pick up where you left off or create a new space for your next project.</p></div><button className="button primary" onClick={() => go('workspaces')}>Manage workspaces</button></section><section className="stat-grid"><Stat label="Workspaces" value={loading ? '—' : workspaces.length} /><Stat label="Shared with you" value={shares?.length ?? '—'} /><StorageStat user={user} /></section><section className="panel"><div className="panel-head"><div><h3>Recent workspaces</h3><p>Spaces you own or collaborate in.</p></div><button className="text-button" onClick={() => go('workspaces')}>View all</button></div>{loading ? <Loading /> : workspaces.length ? <div className="workspace-cards">{workspaces.slice(0, 3).map((workspace) => <WorkspaceCard key={workspace.workspace_id} workspace={workspace} open={() => go('workspace', workspace.workspace_id)} />)}</div> : <Empty title="No workspaces yet" body="Create your first workspace to organize folders and files." action={<button className="button primary" onClick={() => go('workspaces')}>Create workspace</button>} />}</section></div>; }
+  
+  const used = user?.storage_used ?? 0;
+  const limit = user?.storage_limit ?? 0;
+  const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0;
+
+  return (
+    <div className="page-content">
+      <div className="dash-layout">
+        <div className="dash-main">
+          <section className="dash-welcome">
+            <h1>Welcome back, {user?.full_name?.split(' ')[0] || 'User'}</h1>
+            <p className="dash-welcome-quote">Here's an overview of your secure workspace and recent documents.</p>
+            <div className="dash-welcome-tags">
+              <span>{workspaces?.length || 0} workspaces</span>
+              <span>{shares?.length || 0} shared items</span>
+            </div>
+          </section>
+
+          <div className="quick-actions">
+            <button className="quick-action-btn qa-primary" onClick={() => go('workspaces')}>
+              <span>+</span> New Workspace
+            </button>
+          </div>
+
+          <div className="dash-stats">
+            <div className="dash-stat-card">
+              <div className="dash-stat-icon ic-ws">▦</div>
+              <div><strong>{loading ? '—' : workspaces.length}</strong><small>Workspaces</small></div>
+            </div>
+            <div className="dash-stat-card">
+              <div className="dash-stat-icon ic-sh">↗</div>
+              <div><strong>{shares?.length ?? '—'}</strong><small>Shared items</small></div>
+            </div>
+            <div className="dash-stat-card">
+              <div className="dash-stat-icon ic-st">▧</div>
+              <div><strong>{recentFiles.length}</strong><small>Recent docs</small></div>
+            </div>
+          </div>
+
+          <section className="dash-recent">
+            <div className="dash-recent-head">
+              <h3>Recent Documents</h3>
+              {recentFiles.length > 0 && <button className="text-button" onClick={() => go('workspaces')}>Browse all</button>}
+            </div>
+            {loading || loadingFiles ? <Loading /> : recentFiles.length ? (
+              <div className="file-table" style={{minWidth: 0}}>
+                <div className="table-head"><span>Name</span><span>Location</span><span>Size</span><span>Updated</span></div>
+                {recentFiles.map(file => (
+                  <div className="file-row" key={file.file_id} style={{gridTemplateColumns: '1.8fr 1.2fr 0.8fr 1fr', cursor: 'pointer', paddingRight: 8}} onClick={() => go('folder', file.folder.folder_id, file.workspace)}>
+                    <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}><b>▧</b> {file.file_name}</span>
+                    <span style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12}}>{file.workspace_name}</span>
+                    <span style={{fontSize: 12}}>{formatBytes(file.file_size)}</span>
+                    <span style={{fontSize: 12}}>{timeAgo(file.updated_at)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <Empty title="No recent documents" body="Your latest files will appear here." />}
+          </section>
+        </div>
+
+        <aside className="dash-sidebar">
+          <div className="storage-widget">
+            <div className="storage-widget-head">
+              <h3>Storage Usage</h3>
+            </div>
+            <div className="storage-amount">
+              {formatBytes(used)} <small>of {limit ? formatBytes(limit) : 'unlimited'}</small>
+            </div>
+            <div className="storage-bar"><div className="storage-bar-fill" style={{ width: `${pct}%` }} /></div>
+            <div className="storage-pct">{limit > 0 ? `${pct < 0.1 && used > 0 ? '<0.1' : pct.toFixed(1)}% used` : 'No limit set'}</div>
+          </div>
+
+          <div className="ws-sidebar-list">
+            <div className="ws-sidebar-head">
+              <h3>My Workspaces</h3>
+              <button className="text-button" onClick={() => go('workspaces')}>View all</button>
+            </div>
+            {loading ? <Loading /> : workspaces.length ? (
+              workspaces.slice(0, 4).map(ws => (
+                <button className="ws-sidebar-item" key={ws.workspace_id} onClick={() => go('workspace', ws.workspace_id)}>
+                  <div className={`ws-sidebar-dot ${ws.color}`}>{ws.workspace_name.charAt(0).toUpperCase()}</div>
+                  <div className="ws-sidebar-info">
+                    <strong>{ws.workspace_name}</strong>
+                    <small>{ws.visibility}</small>
+                  </div>
+                  <div className={`ws-role-badge r-${(ws.member_role || 'viewer').toLowerCase()}`}>{ws.member_role || 'VIEWER'}</div>
+                </button>
+              ))
+            ) : (
+              <p className="muted" style={{fontSize: 13, margin: 0}}>No workspaces yet.</p>
+            )}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPage() {
+  const { data: inbox, loading, error, reload } = useAsync(api.notifications, []);
+  const markRead = async (item) => {
+    if (!item.is_read) {
+      try { await api.markNotificationRead(item.notification_id); reload(); } 
+      catch (_) {}
+    }
+  };
+  const markAll = async () => {
+    try { await api.markAllNotificationsRead(); reload(); } 
+    catch (_) {}
+  };
+  if (error) return <ErrorState message={error} retry={reload} />;
+  return (
+    <div className="page-content">
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3>Notifications</h3>
+            <p>Recent activity across your workspaces.</p>
+          </div>
+          {inbox?.unread_count > 0 && <button className="button secondary" onClick={markAll}>Mark all as read</button>}
+        </div>
+        {loading ? <Loading /> : inbox?.notifications?.length ? (
+          <div className="notif-page-list">
+            {inbox.notifications.map(item => (
+              <button className={`notif-page-item ${item.is_read ? '' : 'unread'}`} key={item.notification_id} onClick={() => markRead(item)}>
+                {!item.is_read ? <span className="unread-dot" style={{marginTop: 5}}/> : <span style={{width: 8}}/>}
+                <div style={{minWidth: 0}}>
+                  <strong>{item.title}</strong>
+                  <div className="notif-msg">{item.message}</div>
+                </div>
+                <time>{timeAgo(item.created_at)}</time>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <Empty title="You're all caught up" body="No new notifications to show." />
+        )}
+      </section>
+    </div>
+  );
+}
+
 function Stat({ label, value, detail }) { return <div className="stat"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</div>; }
 function StorageStat({ user }) { const used = user?.storage_used ?? 0; const limit = user?.storage_limit ?? 0; const pct = limit > 0 ? Math.min(100, Math.max(0, (used / limit) * 100)) : 0; return <div className="stat storage-stat"><span>Storage</span><strong>{formatBytes(used)} <small className="storage-of">/ {limit ? formatBytes(limit) : 'Unlimited'}</small></strong><div className="storage-bar"><div className="storage-bar-fill" style={{ width: `${pct}%` }} /></div><small>{limit > 0 ? `${pct < 0.1 && used > 0 ? '<0.1' : pct.toFixed(1)}% used` : 'No limit set'}</small></div>; }
 function Loading() { return <div className="loading">Loading real AETHERA data…</div>; }
@@ -638,6 +886,78 @@ function WorkspaceMembers({ workspaceId, workspace, currentUser, membersState, o
   );
 }
 
+function AIDrawer({ file, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const send = async (text) => {
+    const msg = (text || input).trim();
+    if (!msg || loading) return;
+    setInput('');
+    setError('');
+    setMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setLoading(true);
+    try {
+      const result = await api.chatWithFile(file.file_id, msg);
+      setMessages(prev => [...prev, { role: 'ai', content: result.answer }]);
+    } catch (err) {
+      setError(err.message || 'Failed to get AI response');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e) => { e.preventDefault(); send(); };
+  const clearChat = () => { setMessages([]); setError(''); };
+
+  const suggestions = ['Summarize', 'Key points', 'Explain simply', 'Find requirements'];
+
+  return (
+    <div className="ai-drawer">
+      <div className="ai-drawer-header">
+        <div>
+          <h3>✦ Talk with Document</h3>
+          <p className="muted">{file.file_name}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {messages.length > 0 && <button type="button" className="text-button" onClick={clearChat}>Clear</button>}
+          <button type="button" className="ai-drawer-close" onClick={onClose}>×</button>
+        </div>
+      </div>
+      <p className="ai-drawer-desc muted">Ask questions about this document. The AI reads the file content to answer.</p>
+      {messages.length === 0 && (
+        <div className="ai-suggestions">
+          {suggestions.map(s => (
+            <button key={s} type="button" className="ai-chip" onClick={() => send(s)} disabled={loading}>{s}</button>
+          ))}
+        </div>
+      )}
+      <div className="ai-messages">
+        {messages.map((m, i) => (
+          <div key={i} className={`ai-msg ai-msg-${m.role}`}>
+            <span className="ai-msg-label">{m.role === 'user' ? 'You' : '✦ AETHERA AI'}</span>
+            <div className="ai-msg-content">{m.content}</div>
+          </div>
+        ))}
+        {loading && <div className="ai-msg ai-msg-ai"><span className="ai-msg-label">✦ AETHERA AI</span><div className="ai-msg-content ai-typing">Thinking…</div></div>}
+        <div ref={messagesEndRef} />
+      </div>
+      {error && <div className="notice" style={{ margin: '8px 0', fontSize: 12 }}>{error}</div>}
+      <form className="ai-input-form" onSubmit={handleSubmit}>
+        <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about this document…" disabled={loading} />
+        <button type="submit" className="button primary" disabled={loading || !input.trim()} style={{ padding: '10px 16px' }}>{loading ? '…' : '→'}</button>
+      </form>
+    </div>
+  );
+}
+
 function FolderBrowser({ folderId, workspace, back, go, currentUser }) {
   const { data: folder, loading: folderLoading, error: folderError } = useAsync(() => api.folder(folderId), [folderId]);
   const foldersState = useAsync(() => api.folders(workspace.workspace_id), [workspace.workspace_id]);
@@ -645,6 +965,7 @@ function FolderBrowser({ folderId, workspace, back, go, currentUser }) {
   const filesState = useAsync(() => api.files(folderId, { includeDeleted: showTrash }), [folderId, showTrash]);
   const [selected, setSelected] = useState(null);
   const [details, setDetails] = useState(null);
+  const [aiFile, setAiFile] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [pendingFolderDelete, setPendingFolderDelete] = useState(false);
   const [busyFolderDelete, setBusyFolderDelete] = useState(false);
@@ -784,6 +1105,7 @@ function FolderBrowser({ folderId, workspace, back, go, currentUser }) {
                       <button type="button" className="text-button" disabled={busyId === file.file_id} onClick={() => download(file)}>
                         {busyId === file.file_id ? 'Opening…' : 'Download'}
                       </button>
+                      <button type="button" className="text-button ai-action-btn" onClick={() => setAiFile(file)}>✦ AI</button>
                        {canManageFiles && <button type="button" className="text-button" onClick={() => setSelected(file)}>Share</button>}
                        {canManageFiles && <button type="button" className="text-button danger" disabled={busyId === file.file_id} onClick={() => setPendingDelete(file)}>Delete</button>}
                     </>
@@ -805,6 +1127,7 @@ function FolderBrowser({ folderId, workspace, back, go, currentUser }) {
         )}
       </section>
       {selected && <ShareDialog file={selected} close={() => setSelected(null)} onCreated={() => go('shared')} />}
+      {aiFile && <AIDrawer file={aiFile} onClose={() => setAiFile(null)} />}
       {details && (
         <div className="modal-backdrop">
           <div className="modal">
@@ -907,6 +1230,6 @@ function UnifiedSearch({ go }) {
 export default function App() { const [authenticated, setAuthenticated] = useState(Boolean(authStore.token)); const [page, setPage] = useState('dashboard'); const [params, setParams] = useState({}); const [user, setUser] = useState(null); const [oauthError, setOauthError] = useState(''); const googleHandoffStarted = useRef(false); const me = useAsync(() => authenticated ? api.me() : Promise.resolve(null), [authenticated]); useEffect(() => { if (me.data) setUser(me.data); }, [me.data]); useEffect(() => { const handler = () => setAuthenticated(false); window.addEventListener('aethera:unauthorized', handler); return () => window.removeEventListener('aethera:unauthorized', handler); }, []); useEffect(() => { const handoffCode = new URLSearchParams(window.location.search).get('oauth_code'); if (!handoffCode || googleHandoffStarted.current) return; googleHandoffStarted.current = true; api.exchangeGoogleOAuthCode(handoffCode).then((tokens) => { authStore.set(tokens); setAuthenticated(true); }).catch((error) => setOauthError(error.message || 'Google sign-in could not be completed.')).finally(() => window.history.replaceState({}, document.title, window.location.pathname)); }, []);
   const go = (next, id, workspace) => { setPage(next); setParams({ id, workspace }); }; const logout = async () => { try { await api.logout(); } catch (_) {} authStore.clear(); setAuthenticated(false); setPage('dashboard'); };
   if (!authenticated) return <AuthScreen onAuthenticated={() => setAuthenticated(true)} oauthError={oauthError} />;
-  let content = page === 'dashboard' ? <Dashboard go={go} user={user} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <UnifiedSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} currentUser={user} /> : page === 'shared' ? <SharedFiles /> : <Profile onUserChange={setUser} />;
+  let content = page === 'dashboard' ? <Dashboard go={go} user={user} /> : page === 'workspaces' ? <Workspaces open={go} /> : page === 'search' ? <UnifiedSearch go={go} /> : page === 'workspace' ? <WorkspaceDetail workspaceId={params.id} back={() => go('workspaces')} go={go} currentUser={user} /> : page === 'folder' ? <FolderBrowser folderId={params.id} workspace={params.workspace} back={() => go('workspace', params.workspace.workspace_id)} go={go} currentUser={user} /> : page === 'shared' ? <SharedFiles /> : page === 'notifications' ? <NotificationsPage /> : <Profile onUserChange={setUser} />;
   return <AppShell page={page} setPage={setPage} onLogout={logout} user={user}>{content}</AppShell>;
 }

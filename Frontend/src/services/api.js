@@ -94,6 +94,7 @@ export const api = {
   bulkApproveJoinRequests: (workspaceId, requestIds) => request(`/join-requests/workspaces/${workspaceId}/bulk-approve`, json('POST', { request_ids: requestIds })),
   updateFolder: (folderId, data) => request(`/folders/${folderId}`, json('PUT', data)),
   deleteFolder: (folderId) => request(`/folders/${folderId}`, { method: 'DELETE' }),
+  chatWithFile: (fileId, message) => request(`/files/${fileId}/chat`, json('POST', { message })),
 };
 
 export { API_BASE_URL };
